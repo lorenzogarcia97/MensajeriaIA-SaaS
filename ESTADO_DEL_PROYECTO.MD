@@ -322,3 +322,41 @@ Tres puntos de hardening levantados antes de seguir con features nuevas:
    - El tenant placeholder original del seed (`tienda-demo-b`, sin
      dueno ni credenciales) se dejo intacto -- el tenant nuevo de esta
      prueba es uno aparte.
+
+## 8. Preparacion para desplegar en Render
+
+1. **Git inicializado.** El proyecto no tenia repositorio git. Se
+   instalo Git (no estaba presente en el sistema, via `winget install
+   Git.Git`), se corrio `git init` en la raiz, y se hizo el primer
+   commit (88 archivos, rama `main`). No existia `.gitignore` en la
+   raiz (solo uno dentro de `apps/dashboard`) -- se creo uno nuevo en
+   la raiz que cubre `node_modules/`, `dist/`, `.next/`, `.env` y
+   variantes en **todas** las apps del monorepo (patrones `**/`).
+   Verificado con `git status` antes del commit: ni `.env` (con
+   secretos reales) ni ningun `node_modules`/`dist`/`.next` quedaron
+   staged.
+
+2. **Repo en GitHub: pendiente, requiere accion manual.** El CLI `gh`
+   no esta instalado y no hay credenciales de GitHub configuradas en
+   esta maquina, asi que no se pudo crear ni conectar el remoto
+   automaticamente. Instrucciones para hacerlo a mano estan en la
+   respuesta de la sesion donde se hizo este trabajo (crear repo vacio
+   en GitHub, `git remote add origin <url>`, `git push -u origin
+   main`).
+
+3. **`start:prod` del backend corregido.** Existia pero solo hacia
+   `node dist/main.js` (asumia que `dist/` ya estaba compilado).
+   Cambiado a `"npm run build && node dist/main.js"` para que Render
+   pueda usarlo como Start Command sin depender de un Build Command
+   separado que corra antes.
+
+4. **Lista de variables de entorno para Render:** ver `.env.example`
+   en la raiz (variables minimas) mas `REDIS_HOST`/`REDIS_PORT`
+   (usadas en `app.module.ts` para BullMQ, sin default valido fuera de
+   `localhost`). Nota pendiente para produccion: `BullModule.forRoot()`
+   solo soporta `host`/`port`, no `password` ni TLS -- si el Redis de
+   Render exige auth o `rediss://`, hace falta un cambio de codigo
+   chico antes de conectar. `ADMIN_DATABASE_URL` (usada por
+   `db/scripts/migrate.js`) no la necesita el backend en runtime, pero
+   si para correr las migraciones contra la base de Render la primera
+   vez.
