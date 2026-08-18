@@ -6,6 +6,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { BullModule } from '@nestjs/bullmq';
 import { TenantInterceptor } from './common/interceptors/tenant.interceptor';
 import { getPgSslConfig } from './common/config/pg-ssl.util';
+import { getRedisConnectionOptions } from './common/config/redis-connection.util';
 import { TenantModule } from './common/tenant/tenant.module';
 import { CryptoModule } from './common/crypto/crypto.module';
 import { AuthModule } from './auth/auth.module';
@@ -32,10 +33,7 @@ import { MockInventoryModule } from './mock-inventory/mock-inventory.module';
       synchronize: false,
     }),
     BullModule.forRoot({
-      connection: {
-        host: process.env.REDIS_HOST || 'localhost',
-        port: Number(process.env.REDIS_PORT) || 6379,
-      },
+      connection: getRedisConnectionOptions(),
     }),
     TenantModule,
     CryptoModule,

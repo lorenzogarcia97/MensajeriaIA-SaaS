@@ -25,7 +25,7 @@ export class IntegrationsService {
   ) {}
 
   /**
-   * Igual que KnowledgeService.searchKnowledgeBase: se llama desde el
+   * Igual que KnowledgeSearchService.searchKnowledgeBase: se llama desde el
    * worker de WhatsApp, fuera de un request HTTP (sin JWT ni
    * TenantInterceptor de por medio), por eso abre su propia
    * transaccion y fija el tenant a mano en vez de usar

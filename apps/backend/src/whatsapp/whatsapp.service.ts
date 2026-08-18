@@ -3,7 +3,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { CryptoService } from '../common/crypto/crypto.service';
 import { ClaudeService, ToolDefinition, ToolExecutor } from '../ai/claude.service';
-import { KnowledgeService } from '../knowledge/knowledge.service';
+import { KnowledgeSearchService } from '../knowledge/knowledge-search.service';
 import { IntegrationsService } from '../integrations/integrations.service';
 
 interface ParsedMessage {
@@ -29,7 +29,7 @@ export class WhatsappService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly cryptoService: CryptoService,
     private readonly claudeService: ClaudeService,
-    private readonly knowledgeService: KnowledgeService,
+    private readonly knowledgeSearchService: KnowledgeSearchService,
     private readonly integrationsService: IntegrationsService,
   ) {}
 
@@ -59,14 +59,14 @@ export class WhatsappService {
     // A partir de aca, cualquier error se deja propagar -- fallos reales
     // (Claude, Voyage, red, Meta, DB) que la cola debe reintentar.
     const tools: ToolDefinition[] = [
-      this.knowledgeService.getToolDefinition(),
+      this.knowledgeSearchService.getToolDefinition(),
       ...(await this.integrationsService.listActiveTools(tenantId)),
     ];
 
     const executeTool: ToolExecutor = async (toolName, toolInput) => {
       if (toolName === 'search_knowledge_base') {
         const query = toolInput.query as string;
-        const results = await this.knowledgeService.searchKnowledgeBase(tenantId, query);
+        const results = await this.knowledgeSearchService.searchKnowledgeBase(tenantId, query);
         return results.length > 0
           ? results.join('\n---\n')
           : 'No se encontro informacion relevante en la base de conocimiento.';

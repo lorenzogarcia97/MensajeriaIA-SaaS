@@ -1,12 +1,28 @@
 # Estado del Proyecto — WhatsApp SaaS Platform
 
-Ultima actualizacion: 18 de agosto 2026 -- corregido el bug de "SSL/TLS
-required" contra Postgres administrado (Render): nuevo helper
-compartido `getPgSslConfig()` (SSL solo fuera de localhost) aplicado en
-todos los scripts que abren `pg.Client` y en el `TypeOrmModule.forRoot()`
-del backend, mas un script nuevo (`set-prod-role-password.js`) para
-rotar la password de `app_user` antes de exponer la base a internet
-(ver seccion 8, puntos 5 y 6). Antes de eso, Fase 3 (Tool Calling
+Ultima actualizacion: 18 de agosto 2026 -- bug real de produccion
+corregido: `WhatsappIncomingProcessor` (el Worker de BullMQ) se habia
+vuelto REQUEST-scoped por transitividad via `KnowledgeService` (que
+inyectaba `TenantContextService` en el constructor para sus metodos
+HTTP, contagiando el scope a la clase entera, incluido el metodo que
+usa el worker) -- visible en el log de arranque como una advertencia
+de BullMQ ignorando el listener `onFailed`, y con una causa de fondo
+bastante mas seria: el pipeline de WhatsApp dependiendo de un contexto
+de request que no existe en el Worker. Corregido separando
+`KnowledgeService` en dos clases (`KnowledgeSearchService` nueva,
+singleton de verdad, para el path del worker) -- ver bug #16 en la
+seccion 4. Antes de eso, `BullModule.forRoot()` sumo soporte de
+password/TLS via `REDIS_URL` (o `REDIS_HOST/PORT/PASSWORD` sueltos),
+necesario para el Redis administrado de Render, y se dejo la lista
+completa y final de variables de entorno para desplegar el backend en
+Render (ver seccion 8, puntos 7 y 8). Justo antes, corregido
+el bug de "SSL/TLS required" contra Postgres administrado (Render):
+nuevo helper compartido `getPgSslConfig()` (SSL solo fuera de
+localhost) aplicado en todos los scripts que abren `pg.Client` y en el
+`TypeOrmModule.forRoot()` del backend, mas un script nuevo
+(`set-prod-role-password.js`) para rotar la password de `app_user`
+antes de exponer la base a internet (ver seccion 8, puntos 5 y 6).
+Antes de eso, Fase 3 (Tool Calling
 Dinamico) completa: `ClaudeService` generalizado a una lista de tools
 + dispatcher, modulo `integrations/` nuevo, y probado real con una
 tool `check_stock` contra un endpoint falso (ver seccion 5). Antes de
@@ -110,6 +126,42 @@ Celular del usuario
     `migrate.js`). Quedaron rotos hasta que se detecto al armar
     `onboard-tenant.js` (que ademas necesita `bcrypt`). Reagregados
     los tres como dependencias reales del `package.json` de la raiz.
+16. `WhatsappIncomingProcessor` (el Worker de BullMQ) se habia vuelto
+    REQUEST-scoped por transitividad, sin que nada lo dijera en el
+    codigo -- solo se hizo visible en produccion como una advertencia
+    de arranque: `[BullModule] Warning! 'WhatsappIncomingProcessor'
+    class is request-scoped and it defines an event listener... this
+    handler will be ignored`. La cadena real: `KnowledgeService`
+    inyectaba `TenantContextService` (REQUEST-scoped, ver bug #7) en
+    su constructor -- necesario para sus metodos de
+    `KnowledgeController` (`ingestDocument`/`listDocuments`/
+    `deleteDocument`), pero en NestJS el scope de un provider se
+    contagia a TODO lo que lo inyecte, a nivel de clase completa, no
+    de metodo. Como `searchKnowledgeBase()` (llamado desde el worker,
+    sin `TenantContextService`, con su propio `queryRunner` manual)
+    vivia en la MISMA clase que los metodos HTTP, toda `KnowledgeService`
+    quedaba REQUEST-scoped -- y por lo tanto tambien `WhatsappService`
+    (que la inyectaba) y `WhatsappIncomingProcessor` (que inyecta a
+    `WhatsappService`). Un Worker de BullMQ corre fuera de cualquier
+    request HTTP, asi que ese scope nunca podia resolverse de verdad;
+    el sintoma visible fue que Nest simplemente ignoraba el
+    `@OnWorkerEvent('failed')` del processor, pero el problema de
+    fondo era mas serio: el pipeline completo de mensajes de WhatsApp
+    dependia de un contexto de request que no existia en el Worker.
+    **Corregido separando la clase**: los metodos que usa el worker
+    (`searchKnowledgeBase`, `getToolDefinition`) se movieron a un
+    servicio nuevo y realmente singleton, `KnowledgeSearchService`
+    (`knowledge/knowledge-search.service.ts`, sin `TenantContextService`
+    en su constructor), y `WhatsappService` pasa a depender de ese en
+    vez de `KnowledgeService`. `KnowledgeService` (el que usa
+    `KnowledgeController`) se quedo solo con los metodos HTTP y sigue
+    REQUEST-scoped, que es lo correcto para un controller. Se reviso
+    ademas TODO el modulo `integrations/` (la sospecha inicial, por
+    ser de Fase 3): `IntegrationsService` nunca inyecto
+    `TenantContextService` -- ya seguia el patron correcto desde que
+    se escribio. Verificado: arranque del backend ya sin la
+    advertencia de BullMQ, y el test de RLS (`npm run test:rls`) sigue
+    pasando completo.
 
 ## 4bis. Hito: bot de WhatsApp funcional de punta a punta
 
@@ -356,16 +408,8 @@ Tres puntos de hardening levantados antes de seguir con features nuevas:
    pueda usarlo como Start Command sin depender de un Build Command
    separado que corra antes.
 
-4. **Lista de variables de entorno para Render:** ver `.env.example`
-   en la raiz (variables minimas) mas `REDIS_HOST`/`REDIS_PORT`
-   (usadas en `app.module.ts` para BullMQ, sin default valido fuera de
-   `localhost`). Nota pendiente para produccion: `BullModule.forRoot()`
-   solo soporta `host`/`port`, no `password` ni TLS -- si el Redis de
-   Render exige auth o `rediss://`, hace falta un cambio de codigo
-   chico antes de conectar. `ADMIN_DATABASE_URL` (usada por
-   `db/scripts/migrate.js`) no la necesita el backend en runtime, pero
-   si para correr las migraciones contra la base de Render la primera
-   vez.
+4. **Lista de variables de entorno para Render:** ver la tabla completa
+   al final de esta seccion (punto 8).
 
 5. **`app_user` con la password de desarrollo hardcodeada en la
    migracion -- pendiente de rotar contra Render.** La migracion
@@ -406,3 +450,36 @@ Tres puntos de hardening levantados antes de seguir con features nuevas:
    punto **critico**: sin el fix, el backend desplegado en Render
    fallaria al arrancar con el mismo error, no solo las migraciones
    manuales.
+
+7. **`BullModule.forRoot()` sin soporte de password/TLS -- corregido.**
+   Solo armaba la conexion con `REDIS_HOST`/`REDIS_PORT` sueltos, sin
+   `password` -- suficiente para el Redis local de Docker (sin auth),
+   pero el Redis administrado de Render ("Key Value") la exige.
+   Se agrego `apps/backend/src/common/config/redis-connection.util.ts`
+   (`getRedisConnectionOptions()`): si existe `REDIS_URL` (formato
+   `redis[s]://[:password@]host:port`) se usa directo -- bullmq arma
+   el cliente de `ioredis` a partir de esa URL, respetando `rediss://`
+   para TLS sin config adicional; si no existe, arma la conexion como
+   antes con `REDIS_HOST`/`REDIS_PORT`, sumando `REDIS_PASSWORD` si
+   esta definida. El entorno local (sin ninguna de las tres) sigue
+   funcionando igual que antes.
+
+8. **Lista completa y final de variables de entorno para el backend en
+   Render:**
+
+   | Variable | Obligatoria | Para que | Notas |
+   |---|---|---|---|
+   | `DATABASE_URL` | Si | Conexion de TypeORM a Postgres, rol `app_user` | El SSL se detecta solo (punto 6) -- no hace falta agregar `?ssl=true` a la URL. Usar la password nueva rotada con `set-prod-role-password.js` (punto 5), no `devpassword_app`. |
+   | `REDIS_URL` | Si (o las 3 de abajo) | Conexion de BullMQ/ioredis a Redis, con password | Usar la connection string que da Render ("Key Value"). Alternativa: `REDIS_HOST` + `REDIS_PORT` + `REDIS_PASSWORD` por separado (punto 7). |
+   | `JWT_SECRET` | Si | Firma de los JWT del login del dashboard | Debe ser un secreto propio de produccion, distinto al de desarrollo. |
+   | `ENCRYPTION_KEY` | Si | Cifrado AES-256-GCM de credenciales (`CryptoService`) | Hex de 32 bytes (64 caracteres), `openssl rand -hex 32`. Si se migran datos ya cifrados desde desarrollo, tiene que ser la MISMA key usada para cifrarlos -- si no, no van a poder desencriptarse nunca mas. Si la base de Render arranca vacia, se puede generar una nueva. |
+   | `ANTHROPIC_API_KEY` | Si | Llamadas a Claude (`ClaudeService`) | |
+   | `VOYAGE_API_KEY` | Si | Embeddings para RAG (`VoyageService`) | De la cuenta independiente `dash.voyageai.com`, NO la key de "AI Models" de MongoDB Atlas (ver seccion 6). |
+   | `WHATSAPP_VERIFY_TOKEN` | Si | Handshake de verificacion del webhook con Meta | Cualquier texto propio; tiene que coincidir con el que se configure en Meta (Graph API Explorer / App dashboard). |
+   | `PORT` | No | Puerto en el que escucha el backend (`main.ts`) | Render lo inyecta solo para servicios web -- no hace falta declararlo a mano; si se declara igual, no pasa nada porque el fallback es el mismo mecanismo (`process.env.PORT`). |
+   | `ADMIN_DATABASE_URL` | No (no la lee el backend en runtime) | Rol admin para correr migraciones (`db/scripts/migrate.js`) y los demas scripts de `db/scripts/` | No es una variable del servicio backend en Render -- hace falta tenerla a mano (en el `.env` local, apuntando a la base de Render) para correr las migraciones contra esa base la primera vez, y para `set-prod-role-password.js`. |
+
+   Las credenciales de WhatsApp por tenant (`access_token`, etc.) NO son
+   variables de entorno -- viven cifradas en la tabla
+   `whatsapp_credentials`, cargadas con `set-whatsapp-token.js` u
+   `onboard-tenant.js`.
