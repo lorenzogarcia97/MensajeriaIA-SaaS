@@ -1,0 +1,17 @@
+{
+  "tenant": {
+    "name": "Tienda Demo B",
+    "slug": "tienda-demo-b"
+  },
+  "owner": {
+    "email": "owner@tienda-b.cl",
+    "password": "CAMBIAR-por-una-real",
+    "fullName": "Dueno Tienda B"
+  },
+  "whatsapp": {
+    "wabaId": "PEGAR_WABA_ID_DE_META",
+    "phoneNumberId": "PEGAR_PHONE_NUMBER_ID_DE_META",
+    "displayPhoneNumber": "PEGAR_NUMERO_MOSTRADO_EJ_+56911112222",
+    "accessToken": "PEGAR_TOKEN_TEMPORAL_O_PERMANENTE_DE_META"
+  }
+}

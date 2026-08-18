@@ -1,0 +1,53 @@
+# Dependencies (cada app tiene su propio node_modules, npm sin pnpm todavia)
+node_modules/
+**/node_modules/
+
+# Env files -- NUNCA commitear secretos reales
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Builds de produccion
+dist/
+**/dist/
+build/
+**/build/
+
+# Next.js (apps/dashboard)
+.next/
+**/.next/
+out/
+**/out/
+.vercel
+next-env.d.ts
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+*.log
+
+# Testing / coverage
+coverage/
+**/coverage/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# TypeScript
+*.tsbuildinfo
+
+# Yarn PnP (por si acaso, no se usa yarn aca pero no hace dano)
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions

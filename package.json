@@ -1,0 +1,13 @@
+{
+  "name": "whatsapp-saas-platform",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "test:rls": "node --test db/tests/rls.test.js"
+  },
+  "dependencies": {
+    "bcrypt": "^5.1.1",
+    "dotenv": "^17.0.0",
+    "pg": "^8.11.0"
+  }
+}

@@ -1,0 +1,29 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg18
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: whatsapp_saas
+      POSTGRES_PASSWORD: devpassword
+      POSTGRES_DB: whatsapp_saas_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      # IMPORTANTE: desde Postgres 18, el volumen de datos se monta en
+      # /var/lib/postgresql (la carpeta padre), NO en /var/lib/postgresql/data
+      # como en versiones anteriores. La imagen ahora organiza los datos
+      # en subcarpetas por version mayor (estilo pg_ctlcluster) dentro de
+      # ese punto de montaje. Montar en /data como antes hace que la
+      # imagen detecte un layout viejo/incompatible y se niegue a arrancar.
+      - pgdata:/var/lib/postgresql
+      - ./db/migrations:/docker-entrypoint-initdb.d:ro
+      - ./db/seeds:/seeds:ro
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+volumes:
+  pgdata:
