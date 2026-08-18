@@ -1,6 +1,12 @@
 # Estado del Proyecto — WhatsApp SaaS Platform
 
-Ultima actualizacion: 18 de agosto 2026 -- Fase 3 (Tool Calling
+Ultima actualizacion: 18 de agosto 2026 -- corregido el bug de "SSL/TLS
+required" contra Postgres administrado (Render): nuevo helper
+compartido `getPgSslConfig()` (SSL solo fuera de localhost) aplicado en
+todos los scripts que abren `pg.Client` y en el `TypeOrmModule.forRoot()`
+del backend, mas un script nuevo (`set-prod-role-password.js`) para
+rotar la password de `app_user` antes de exponer la base a internet
+(ver seccion 8, puntos 5 y 6). Antes de eso, Fase 3 (Tool Calling
 Dinamico) completa: `ClaudeService` generalizado a una lista de tools
 + dispatcher, modulo `integrations/` nuevo, y probado real con una
 tool `check_stock` contra un endpoint falso (ver seccion 5). Antes de
@@ -360,3 +366,43 @@ Tres puntos de hardening levantados antes de seguir con features nuevas:
    `db/scripts/migrate.js`) no la necesita el backend en runtime, pero
    si para correr las migraciones contra la base de Render la primera
    vez.
+
+5. **`app_user` con la password de desarrollo hardcodeada en la
+   migracion -- pendiente de rotar contra Render.** La migracion
+   `007_rls_policies.sql` crea `app_user` con
+   `WITH LOGIN PASSWORD 'devpassword_app'` -- una password de
+   desarrollo, en texto plano, en un archivo versionado. Sirve para
+   Docker local, pero es exactamente la que quedaria activa en la base
+   de Render si no se cambia, y esa base esta expuesta a internet.
+   Script nuevo para rotarla: `db/scripts/set-prod-role-password.js
+   <admin_connection_url> <password_nueva>` -- a diferencia de los
+   demas scripts de `db/scripts/`, no lee `ADMIN_DATABASE_URL` del
+   `.env`: la URL admin y la password nuevas se pasan por argumento a
+   proposito, para no depender de (ni pisar) las variables de entorno
+   de desarrollo local. Corre `ALTER ROLE app_user WITH PASSWORD ...`
+   contra la base que se le indique. Pendiente: correrlo contra Render
+   una vez creada la base ahi, y actualizar `DATABASE_URL` en las
+   variables de entorno del backend en Render con la password nueva.
+
+6. **Bug real: "SSL/TLS required" al conectar a Render -- corregido en
+   todos los puntos de conexion directa a Postgres.** Render exige SSL
+   en la conexion y el cliente `pg` no lo pedia -- localhost (Docker)
+   funcionaba porque Postgres local no tiene SSL configurado, pero
+   contra Render la conexion fallaba de entrada, antes de poder correr
+   ni una migracion. Se agrego un helper compartido,
+   `db/lib/pg-ssl.js` (`getPgSslConfig(connectionString)`): si el host
+   de la URL es `localhost`/`127.0.0.1` no usa SSL, para cualquier
+   otro host usa `{ rejectUnauthorized: false }` (patron estandar para
+   Postgres administrado tipo Render/Heroku, cuyos certificados no
+   siempre encadenan a una CA publica conocida por Node). Aplicado en
+   los cinco scripts de `db/scripts/` que abren un `pg.Client`
+   (`migrate.js`, `set-whatsapp-token.js`, `set-prod-role-password.js`,
+   `onboard-tenant.js`, `seed-mock-inventory-tool.js`) y en
+   `db/tests/rls.test.js` (los tres clientes: admin, app, y el
+   `freshClient` de la prueba sin contexto de tenant). Para el backend
+   se creo el equivalente en TypeScript,
+   `apps/backend/src/common/config/pg-ssl.util.ts`, usado en el
+   `TypeOrmModule.forRoot()` de `app.module.ts` -- este ultimo era el
+   punto **critico**: sin el fix, el backend desplegado en Render
+   fallaria al arrancar con el mismo error, no solo las migraciones
+   manuales.

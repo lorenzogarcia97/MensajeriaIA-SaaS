@@ -15,6 +15,7 @@ require('dotenv').config();
 
 const { randomBytes, createCipheriv } = require('crypto');
 const { Client } = require('pg');
+const { getPgSslConfig } = require('../lib/pg-ssl');
 
 function encrypt(plaintext, keyHex) {
   const key = Buffer.from(keyHex, 'hex');
@@ -35,7 +36,7 @@ async function run() {
     process.env.ADMIN_DATABASE_URL ||
     'postgresql://whatsapp_saas:devpassword@localhost:5432/whatsapp_saas_dev';
 
-  const client = new Client({ connectionString: ADMIN_URL });
+  const client = new Client({ connectionString: ADMIN_URL, ssl: getPgSslConfig(ADMIN_URL) });
   await client.connect();
 
   const tenantRows = await client.query(`SELECT id FROM tenants WHERE slug = 'tienda-demo-a'`);

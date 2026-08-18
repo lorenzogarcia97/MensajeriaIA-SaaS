@@ -19,6 +19,7 @@ require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 const { Client } = require('pg');
+const { getPgSslConfig } = require('../lib/pg-ssl');
 
 const MIGRATIONS_DIR = path.join(__dirname, '..', 'migrations');
 
@@ -27,7 +28,7 @@ const ADMIN_URL =
   'postgresql://whatsapp_saas:devpassword@localhost:5432/whatsapp_saas_dev';
 
 async function run() {
-  const client = new Client({ connectionString: ADMIN_URL });
+  const client = new Client({ connectionString: ADMIN_URL, ssl: getPgSslConfig(ADMIN_URL) });
   await client.connect();
 
   // Defensivo: por si alguien corre esto contra una base MUY vieja,

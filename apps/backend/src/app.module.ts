@@ -5,6 +5,7 @@ import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { BullModule } from '@nestjs/bullmq';
 import { TenantInterceptor } from './common/interceptors/tenant.interceptor';
+import { getPgSslConfig } from './common/config/pg-ssl.util';
 import { TenantModule } from './common/tenant/tenant.module';
 import { CryptoModule } from './common/crypto/crypto.module';
 import { AuthModule } from './auth/auth.module';
@@ -26,6 +27,7 @@ import { MockInventoryModule } from './mock-inventory/mock-inventory.module';
     TypeOrmModule.forRoot({
       type: 'postgres',
       url: process.env.DATABASE_URL,
+      ssl: getPgSslConfig(process.env.DATABASE_URL),
       autoLoadEntities: true,
       synchronize: false,
     }),

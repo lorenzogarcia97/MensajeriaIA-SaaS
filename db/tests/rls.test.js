@@ -15,6 +15,7 @@ const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const { Client } = require('pg');
+const { getPgSslConfig } = require('../lib/pg-ssl');
 
 // whatsapp_saas: rol admin, usado SOLO para preparar y limpiar los datos
 // de la prueba (como un seed real). NUNCA se usa para las aserciones de
@@ -42,8 +43,8 @@ async function setTenant(client, tenantId) {
 }
 
 before(async () => {
-  adminClient = new Client({ connectionString: ADMIN_URL });
-  appClient = new Client({ connectionString: APP_URL });
+  adminClient = new Client({ connectionString: ADMIN_URL, ssl: getPgSslConfig(ADMIN_URL) });
+  appClient = new Client({ connectionString: APP_URL, ssl: getPgSslConfig(APP_URL) });
   await adminClient.connect();
   await appClient.connect();
 
@@ -68,7 +69,7 @@ after(async () => {
 test('sin contexto de tenant, no se ve ningun contacto de prueba', async () => {
   // Conexion NUEVA a proposito: nunca llamo set_config, simula
   // exactamente "una peticion que llego sin pasar por el interceptor".
-  const freshClient = new Client({ connectionString: APP_URL });
+  const freshClient = new Client({ connectionString: APP_URL, ssl: getPgSslConfig(APP_URL) });
   await freshClient.connect();
   try {
     const { rows } = await freshClient.query(

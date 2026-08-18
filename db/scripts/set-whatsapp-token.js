@@ -9,6 +9,7 @@
 require('dotenv').config();
 const { randomBytes, createCipheriv } = require('crypto');
 const { Client } = require('pg');
+const { getPgSslConfig } = require('../lib/pg-ssl');
 
 function encrypt(plaintext, keyHex) {
   const key = Buffer.from(keyHex, 'hex');
@@ -35,7 +36,7 @@ const ADMIN_URL =
 
 async function run() {
   const encrypted = encrypt(token, process.env.ENCRYPTION_KEY);
-  const client = new Client({ connectionString: ADMIN_URL });
+  const client = new Client({ connectionString: ADMIN_URL, ssl: getPgSslConfig(ADMIN_URL) });
   await client.connect();
 
   const result = await client.query(
