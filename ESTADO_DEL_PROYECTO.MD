@@ -1,6 +1,38 @@
 # Estado del Proyecto — WhatsApp SaaS Platform
 
-Ultima actualizacion: 19 de agosto 2026 -- cerrado por completo el bug
+Ultima actualizacion: 19 de agosto 2026 -- rediseño visual completo del
+dashboard (`apps/dashboard`): login, conversaciones y documentos ahora
+usan la identidad de marca "Conversa" (paleta verde-petroleo/papel-salvia
+/naranja-quemado, tipografia Roboto Slab para titulos + Work Sans para
+cuerpo) tomada de la landing real del producto en `web_page/index.html`
+(fuera de este repo, en la carpeta padre) -- antes el dashboard usaba
+clases de Tailwind genericas (`bg-gray-50`, `text-blue-600`, etc.) sin
+ninguna identidad propia, como si fuera una herramienta interna generica
+en vez de parte del mismo producto que la landing. Cambios: los tokens de
+color/tipografia se movieron a `globals.css` como variables de tema de
+Tailwind v4 (`bg-paper`, `text-ink`, `bg-accent`, `font-serif`, etc.),
+`layout.tsx` paso de las fuentes Geist por defecto de `create-next-app` a
+Roboto Slab + Work Sans via `next/font/google`, se extrajo un nav
+compartido (`components/DashboardNav.tsx`, usado en conversaciones y
+documentos en vez de duplicar el header a mano en cada pagina), y las
+tres paginas sumaron estados vacios propios ("Todavia no hay
+conversaciones", etc.) y de carga con spinner en vez de un parrafo gris
+generico, ademas de formularios con foco/labels cuidados en vez de los
+defaults del navegador. **La funcionalidad no cambio en nada** -- mismos
+handlers, mismos endpoints, mismo flujo de login/fetch/upload/delete.
+Verificado visualmente en el navegador (Chrome, via la extension
+`claude-in-chrome`) con `fetch` mockeado para forzar y revisar los tres
+estados (vacio/cargando/con datos) de cada pagina, ya que el backend
+local no estaba corriendo en ese momento. De paso, al levantar despues el
+backend para una prueba de login, se confirmo que el usuario de
+desarrollo (`owner@tienda-a.cl` / `Demo1234!`, ver `db/seeds/dev_seed.sql`)
+si funciona -- el "no puedo ingresar" que reporto el usuario no era la
+contraseña, sino que el backend no estaba levantado; el login del
+dashboard atrapa CUALQUIER error en el `catch` (incluida una falla de red
+por backend caido) y siempre muestra "Email o contraseña incorrectos",
+sin distinguir un 401 real de "no hay servidor escuchando" -- bug de UX
+identificado pero **todavia no corregido** (ver bug #18 en la seccion 4).
+Antes de eso, cerrado por completo el bug
 #17 (Render sin datos del tenant). Se copio la base de conocimiento
 (RAG) de Tienda Demo A que faltaba: leidos sus `knowledge_sources`/
 `knowledge_chunks` en local (reconstruyendo el documento completo
@@ -63,8 +95,10 @@ punto 3).
 ## 1. Que existe hasta ahora
 
 - Documento de arquitectura completo (7 secciones).
-- Monorepo: `apps/backend` (NestJS, funcional), `apps/ai-service` y
-  `apps/dashboard` (stubs, se construyen mas adelante).
+- Monorepo: `apps/backend` (NestJS, funcional) y `apps/dashboard`
+  (Next.js, funcional -- login, conversaciones, documentos, con la
+  identidad visual "Conversa", ver seccion 4quater). `apps/ai-service`
+  sigue siendo un stub, se construye mas adelante.
 - Base de datos: 12 tablas + RLS probado (lectura y escritura), rol de
   aplicacion separado del admin, sistema de migraciones auto-registrado,
   y un test automatizado de aislamiento (`npm test:rls` / `node --test`).
@@ -241,6 +275,20 @@ Celular del usuario
     replicados en Render, y el flujo completo (WhatsApp real -> Meta
     -> Render -> Claude -> RAG -> respuesta -> Meta -> WhatsApp del
     usuario) esta probado en produccion.
+18. **Pendiente, identificado pero no corregido: el login del dashboard
+    no distingue credenciales invalidas de backend caido.**
+    `apps/dashboard/src/app/login/page.tsx` envuelve `login()` en un
+    `try/catch` que muestra siempre el mismo mensaje ("Email o
+    contraseña incorrectos.") sin mirar la causa real del error --
+    tanto un 401 del backend como un `fetch` que nunca pudo conectar
+    (backend apagado, URL mal, red caida) caen en el mismo `catch`.
+    Se detecto porque el usuario reporto "no puedo ingresar" con
+    `owner@tienda-a.cl` / `Demo1234!` (credenciales correctas,
+    verificadas con `bcrypt.compareSync` contra el hash de
+    `db/seeds/dev_seed.sql`) cuando el problema real era que el backend
+    no estaba corriendo en local. Arreglo pendiente: diferenciar en
+    `lib/api.ts`/`login/page.tsx` un error de red de un 401 real, con
+    un mensaje distinto para cada caso.
 
 ## 4bis. Hito: bot de WhatsApp funcional de punta a punta
 
@@ -262,6 +310,36 @@ Se agrego una pagina `/documents` al dashboard: subir documentos (nombre
 + texto), ver la lista con su estado, y borrarlos -- todo desde el
 navegador, sin necesitar PowerShell. Link cruzado con `/` (conversaciones)
 para moverse entre las dos pantallas.
+
+## 4quater. Rediseño visual del dashboard (identidad "Conversa")
+
+Las tres paginas del dashboard (`login`, `/` conversaciones, `/documents`)
+pasaron de Tailwind generico a la identidad visual real del producto,
+tomada de la landing (`web_page/index.html`, fuera de este repo, carpeta
+padre -- no confundir con `apps/dashboard`):
+
+- **Paleta**: verde-petroleo oscuro (`--ink`) como color de texto/marca,
+  papel salvia claro (`--paper`) de fondo, una tarjeta mas clara
+  (`--card`) para superficies, naranja quemado (`--accent`) para acciones
+  primarias y estados de error, dorado (`--gold`) para badges de estado.
+  Definida en `apps/dashboard/src/app/globals.css` como variables CSS y
+  mapeada a utilidades de Tailwind v4 (`@theme inline`) para poder usar
+  `bg-paper`, `text-ink`, `bg-accent`, `border-line`, etc. directo en el
+  JSX.
+- **Tipografia**: Roboto Slab (titulos, `font-serif`) + Work Sans (cuerpo,
+  `font-sans`), cargadas con `next/font/google` en `layout.tsx` en vez de
+  las fuentes Geist que trae `create-next-app` por defecto.
+- **Componente nuevo**: `apps/dashboard/src/components/DashboardNav.tsx`
+  -- el header con el logo "Convers*a*" (la "a" final en naranja) y los
+  links Conversaciones/Documentos/Cerrar sesion, antes duplicado a mano
+  en cada pagina.
+- **Estados**: las tres pantallas ahora tienen estado vacio propio (texto
+  + subtexto explicando que hacer), estado de carga con spinner en vez de
+  "Cargando..." en texto plano, y estado de error con fondo naranja
+  suave en vez de texto rojo simple.
+- La funcionalidad (login, fetch, upload, delete, logout, redirects) no
+  cambio -- fue un cambio puramente visual, verificado en el navegador con
+  datos mockeados para los tres estados de cada pagina.
 
 ## 5. Que falta
 
