@@ -1,6 +1,15 @@
 # Estado del Proyecto — WhatsApp SaaS Platform
 
-Ultima actualizacion: 19 de agosto 2026 -- rediseño visual completo del
+Ultima actualizacion: 19 de agosto 2026 -- corregido el bug de UX del
+login del dashboard detectado en la sesion anterior: mostraba "Email o
+contraseña incorrectos" para CUALQUIER error, incluida la caida del
+backend. `apps/dashboard/src/lib/api.ts` ahora expone una clase `ApiError`
+con un `code` (`network_error` / `invalid_credentials` / `server_error`)
+segun la causa real del fallo, y `login/page.tsx` muestra un mensaje
+distinto para cada caso. Probado en el navegador en los tres escenarios
+(contraseña incorrecta, backend caido simulado con `fetch` mockeado, y
+login real exitoso) -- ver bug #18 en la seccion 4, ya marcado como
+corregido. Antes de eso, rediseño visual completo del
 dashboard (`apps/dashboard`): login, conversaciones y documentos ahora
 usan la identidad de marca "Conversa" (paleta verde-petroleo/papel-salvia
 /naranja-quemado, tipografia Roboto Slab para titulos + Work Sans para
@@ -275,20 +284,28 @@ Celular del usuario
     replicados en Render, y el flujo completo (WhatsApp real -> Meta
     -> Render -> Claude -> RAG -> respuesta -> Meta -> WhatsApp del
     usuario) esta probado en produccion.
-18. **Pendiente, identificado pero no corregido: el login del dashboard
-    no distingue credenciales invalidas de backend caido.**
-    `apps/dashboard/src/app/login/page.tsx` envuelve `login()` en un
-    `try/catch` que muestra siempre el mismo mensaje ("Email o
+18. **Corregido: el login del dashboard no distinguia credenciales
+    invalidas de backend caido.**
+    `apps/dashboard/src/app/login/page.tsx` envolvia `login()` en un
+    `try/catch` que mostraba siempre el mismo mensaje ("Email o
     contraseña incorrectos.") sin mirar la causa real del error --
     tanto un 401 del backend como un `fetch` que nunca pudo conectar
-    (backend apagado, URL mal, red caida) caen en el mismo `catch`.
+    (backend apagado, URL mal, red caida) caian en el mismo `catch`.
     Se detecto porque el usuario reporto "no puedo ingresar" con
     `owner@tienda-a.cl` / `Demo1234!` (credenciales correctas,
     verificadas con `bcrypt.compareSync` contra el hash de
     `db/seeds/dev_seed.sql`) cuando el problema real era que el backend
-    no estaba corriendo en local. Arreglo pendiente: diferenciar en
-    `lib/api.ts`/`login/page.tsx` un error de red de un 401 real, con
-    un mensaje distinto para cada caso.
+    no estaba corriendo en local. **Arreglado**: `lib/api.ts` sumo una
+    clase `ApiError` con un `code` (`network_error` / `invalid_credentials`
+    / `server_error`) segun la causa real -- `fetch` que nunca conecta,
+    401 del backend, o cualquier otro `!res.ok` -- y `login/page.tsx`
+    muestra un mensaje distinto para cada caso ("No se pudo conectar con
+    el servidor. Verifica que el backend este activo." para la caida de
+    red, "Email o contraseña incorrectos." solo para el 401, un mensaje
+    generico para el resto). Probado en el navegador (Chrome, via
+    `claude-in-chrome`) en los tres escenarios: contraseña incorrecta con
+    backend arriba, `fetch` mockeado para simular backend caido, y login
+    real exitoso -- los tres muestran el mensaje correcto.
 
 ## 4bis. Hito: bot de WhatsApp funcional de punta a punta
 
