@@ -1,6 +1,36 @@
 # Estado del Proyecto — WhatsApp SaaS Platform
 
-Ultima actualizacion: 19 de agosto 2026 -- observabilidad basica en el
+Ultima actualizacion: 19 de agosto 2026 -- segundo tenant real onboardeado
+en PRODUCCION (Render), "Vuelta Canela": un cliente real (no una prueba
+de aislamiento) que va a probar el contenido/dashboard antes de conectar
+su numero oficial de WhatsApp. Corrido `db/scripts/onboard-tenant.js`
+contra `ADMIN_DATABASE_URL` de Render (External Database URL -- la
+Internal no resuelve fuera de la red de Render, se detecto al primer
+intento y se corrigio con la URL correcta que paso el usuario), con
+WhatsApp credentials INVENTADAS a proposito (mismo patron que Tienda
+Demo B, ver seccion 7 punto 3, y la misma razon: no pedirle a Meta un
+segundo numero de prueba real, ver memoria `meta-whatsapp-test-numbers`)
+-- `phone_number_id`/`wabaId` fake, `connection_status` quedo en
+`pending` porque la suscripcion App-WABA fallo con 401 (esperado, el
+token es inventado) -- a diferencia de Tienda Demo B, NO se forzo a mano
+a `connected`, porque ahi si habia una prueba de aislamiento que
+necesitaba simular un mensaje entrante; aca el objetivo es solo el login
+al dashboard, y forzar `connected` con credenciales falsas hubiera sido
+un estado enganoso para un tenant que va a ser real. Verificado
+`ADMIN_DATABASE_URL` sin conflictos antes de insertar (slug, email y
+`phone_number_id` unicos), y despues de crear el tenant: login real
+contra el backend desplegado (`backend-mensajeriaia-saas.onrender.com`)
+con `lorenzo.garciay97@gmail.com` y la password temporal devolvio un JWT
+valido con el `tenantId` correcto, `GET /conversations` respondio `[]`
+(tenant nuevo, sin conversaciones todavia) y `GET /health` de produccion
+sigue en `200`. `ADMIN_DATABASE_URL` quedo guardada en el `.env` local
+(no en el repo -- sigue en `.gitignore`) para no tener que pedirla de
+nuevo en la proxima sesion. Antes de eso, UptimeRobot configurado y
+monitoreando `GET /health` (ver seccion 9, punto 5), cerrando el ultimo
+punto suelto de la observabilidad basica de esa sesion: ya no solo se
+sabe que algo se rompio (Sentry) y se puede chequear el estado a mano
+(`/health`), sino que ahora hay una alerta externa activa si el servicio
+cae. Antes de eso, observabilidad basica en el
 backend, antes de seguir sumando features de Fase 4 (ver seccion 9 para
 el detalle completo): SDK oficial de Sentry para NestJS (`@sentry/nestjs`,
 no un paquete de comunidad) capturando tanto excepciones del ciclo HTTP
@@ -507,7 +537,8 @@ padre -- no confundir con `apps/dashboard`):
 
 **Fase 4:** produccion/escalado -- EN CURSO.
 - [x] Observabilidad basica: Sentry (SDK oficial `@sentry/nestjs`) +
-      `GET /health` con chequeo real de Postgres/Redis. Ver seccion 9.
+      `GET /health` con chequeo real de Postgres/Redis + UptimeRobot
+      monitoreando ese endpoint. Ver seccion 9.
 - [ ] El resto de produccion/escalado: sin tocar todavia.
 
 ## 6. Notas operativas utiles
@@ -850,3 +881,36 @@ se rompe (Sentry) y poder chequear si el servicio esta realmente sano
    explicitamente (mismo criterio que ya se aplico antes con `pg` en la
    raiz del repo, ver bug #15 en la seccion 4: si el codigo la importa
    de verdad, tiene que estar declarada, no solo colgar de otro paquete).
+
+6. **UptimeRobot monitoreando `GET /health` -- configurado por el
+   usuario, fuera del repo.** Cierra el ultimo punto suelto de esta
+   sesion: hasta este punto, `/health` existia y respondia bien, pero
+   nadie lo estaba mirando salvo que alguien lo pidiera a mano -- una
+   caida real de Postgres o Redis en produccion hubiera pasado
+   desapercibida hasta que un usuario se quejara. Con el monitor externo
+   activo, una caida de cualquiera de los dos ahora genera una alerta
+   real sin depender de que alguien este mirando. No hay nada que
+   documentar del lado del codigo -- es configuracion externa en el
+   panel de UptimeRobot (URL del `/health` ya desplegado, intervalo de
+   chequeo, canal de alerta), no un archivo de este repo.
+
+## 10. Tenants reales en produccion (no de prueba)
+
+Tenants creados en la base de Render que corresponden a un negocio real
+(o un prospecto real), a diferencia de Tienda Demo A/B que son solo para
+probar el producto:
+
+| Tenant | Slug | Login del dashboard | WhatsApp | Notas |
+|---|---|---|---|---|
+| Vuelta Canela | `vuelta-canela` | `lorenzo.garciay97@gmail.com`, password temporal (entregada fuera de este repo) | `connection_status: pending`, credenciales INVENTADAS a proposito | Onboardeado el 19 de agosto 2026 para que el cliente pruebe el contenido/dashboard antes de conectar su numero oficial. Antes de recibir mensajes reales por WhatsApp hace falta: (1) crear la App/WABA/numero real en Meta, (2) correr `set-whatsapp-token.js` (o repetir `onboard-tenant.js`) con los datos reales, reemplazando el `access_token` inventado, y (3) hacer `POST /{WABA_ID}/subscribed_apps` (a mano o dejando que el script lo intente solo) para que `connection_status` pase a `connected` -- sin eso, `find_tenant_by_phone_number_id()` nunca va a resolver este tenant y los mensajes entrantes se van a ignorar en silencio (mismo mecanismo que el bug #17). |
+
+Onboardeado con `db/scripts/onboard-tenant.js` contra
+`ADMIN_DATABASE_URL` de Render (la External Database URL -- la Internal
+no resuelve fuera de la red privada de Render, primer intento fallo con
+`ENOTFOUND` hasta corregir la URL). Verificado sin conflictos de
+slug/email/`phone_number_id` antes de insertar, y despues: login real
+contra `https://backend-mensajeriaia-saas.onrender.com` devolvio un JWT
+valido con el `tenantId` correcto, y `GET /conversations` respondio `[]`
+(esperado, tenant nuevo). `ADMIN_DATABASE_URL` quedo guardada en el
+`.env` local (gitignored, no en el repo) para reutilizarla en la
+proxima sesion sin tener que pedirla de nuevo.
