@@ -1,5 +1,14 @@
 const API_URL = 'http://localhost:3001';
 
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public code: 'network_error' | 'invalid_credentials' | 'server_error',
+  ) {
+    super(message);
+  }
+}
+
 export function saveToken(token: string) {
   localStorage.setItem('token', token);
 }
@@ -14,13 +23,21 @@ export function clearToken() {
 }
 
 export async function login(email: string, password: string): Promise<string> {
-  const res = await fetch(`${API_URL}/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+  } catch {
+    throw new ApiError('No se pudo conectar con el servidor', 'network_error');
+  }
+  if (res.status === 401) {
+    throw new ApiError('Credenciales invalidas', 'invalid_credentials');
+  }
   if (!res.ok) {
-    throw new Error('Credenciales invalidas');
+    throw new ApiError('Error del servidor', 'server_error');
   }
   const data = await res.json();
   return data.access_token;

@@ -2,7 +2,7 @@
 
 import { useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import { login, saveToken } from '@/lib/api';
+import { login, saveToken, ApiError } from '@/lib/api';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -19,8 +19,14 @@ export default function LoginPage() {
       const token = await login(email, password);
       saveToken(token);
       router.push('/');
-    } catch {
-      setError('Email o contraseña incorrectos.');
+    } catch (err) {
+      if (err instanceof ApiError && err.code === 'network_error') {
+        setError('No se pudo conectar con el servidor. Verifica que el backend este activo.');
+      } else if (err instanceof ApiError && err.code === 'invalid_credentials') {
+        setError('Email o contraseña incorrectos.');
+      } else {
+        setError('Ocurrio un error inesperado. Intenta de nuevo.');
+      }
     } finally {
       setLoading(false);
     }
