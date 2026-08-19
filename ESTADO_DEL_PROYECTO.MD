@@ -1,6 +1,25 @@
 # Estado del Proyecto — WhatsApp SaaS Platform
 
-Ultima actualizacion: 18 de agosto 2026 -- bug real de produccion
+Ultima actualizacion: 18 de agosto 2026 -- bug real en produccion
+corregido: con el backend ya desplegado en Render, los mensajes de
+WhatsApp no se procesaban (`No hay ningun tenant conectado al
+phone_number_id ...`) porque Render tenia el esquema (migraciones
+aplicadas) pero CERO datos -- el onboarding real del tenant solo se
+habia hecho contra la base local. Copiada la fila de tenant + usuario
+dueno + `whatsapp_credentials` (token cifrado, sin desencriptar en
+ningun momento) de local a Render; requirio antes sincronizar
+`ENCRYPTION_KEY` entre ambos entornos. Verificado en vivo que la
+funcion de lookup ya resuelve el tenant en Render -- ver bug #17 en la
+seccion 4. Pendiente real: falta copiar la base de conocimiento (RAG)
+de este tenant y probar un mensaje real de punta a punta contra Render.
+Antes de eso, probado en vivo contra la
+base de Render real: el fix de SSL conecta sin error (y de paso revelo
+que esa base ya tenia las 10 migraciones aplicadas de antes, con
+`app_user` usando todavia la password hardcodeada de la migracion
+007). Rotada esa password con `set-prod-role-password.js` y una
+password nueva generada al azar -- entregada al usuario para que
+actualice `DATABASE_URL` en Render, no quedo guardada en ningun
+archivo (ver seccion 8, punto 5). Antes de eso, bug real de produccion
 corregido: `WhatsappIncomingProcessor` (el Worker de BullMQ) se habia
 vuelto REQUEST-scoped por transitividad via `KnowledgeService` (que
 inyectaba `TenantContextService` en el constructor para sus metodos
@@ -162,6 +181,39 @@ Celular del usuario
     se escribio. Verificado: arranque del backend ya sin la
     advertencia de BullMQ, y el test de RLS (`npm run test:rls`) sigue
     pasando completo.
+17. **Bug real en produccion: Render nunca tuvo los datos del tenant,
+    solo el esquema.** Ya con el backend desplegado y `DATABASE_URL`/
+    `ENCRYPTION_KEY` correctos en Render, los mensajes de WhatsApp
+    seguian sin procesarse -- el log mostraba `No hay ningun tenant
+    conectado al phone_number_id 1241828399019171`
+    (`find_tenant_by_phone_number_id()`, migracion 009, devolvia 0
+    filas). Se conecto directo a la base de Render con
+    `ADMIN_DATABASE_URL` y se confirmo la causa: `SELECT count(*) FROM
+    tenants` y `whatsapp_credentials` daban **0** -- las migraciones
+    (el esquema) si estaban aplicadas ahi, pero el onboarding real
+    (`onboard-tenant.js`, `set-whatsapp-token.js`) solo se habia
+    corrido contra el Postgres local de Docker, nunca contra Render.
+    Ambas bases quedaron con esquemas identicos pero datos
+    completamente distintos sin que nada lo advirtiera.
+    **Corregido**: copiado directo de la fila de `tenants` ("Tienda
+    Demo A"), su usuario dueno, y su `whatsapp_credentials` (el
+    `access_token_encrypted` se copio TAL CUAL, como blob opaco --
+    nunca se desencripto durante la copia) de local a Render, con un
+    script one-off. Requisito previo verificado con el usuario:
+    `ENCRYPTION_KEY` en Render actualizado para ser IDENTICO al de
+    `.env` local -- si no coincide, el token copiado no se puede
+    desencriptar en runtime aunque la fila exista. Verificado en vivo:
+    `find_tenant_by_phone_number_id('1241828399019171')` contra Render
+    ya devuelve el tenant correcto.
+    **Pendiente real**: los `knowledge_sources`/`knowledge_chunks`
+    (documentos de la base de conocimiento, RAG) de este tenant NO se
+    copiaron -- solo tenant + usuario + credenciales de WhatsApp. Si
+    se le pregunta al bot en Render algo que dependa de un documento
+    subido solo en local, todavia no va a tener esa informacion; hay
+    que volver a subirlos via `POST /knowledge/documents` apuntando a
+    produccion. Tambien falta la prueba real de punta a punta (mandar
+    un WhatsApp de verdad y confirmar que Render responde) -- no se
+    hizo desde esta sesion.
 
 ## 4bis. Hito: bot de WhatsApp funcional de punta a punta
 
@@ -412,21 +464,28 @@ Tres puntos de hardening levantados antes de seguir con features nuevas:
    al final de esta seccion (punto 8).
 
 5. **`app_user` con la password de desarrollo hardcodeada en la
-   migracion -- pendiente de rotar contra Render.** La migracion
+   migracion -- rotada contra Render, YA COMPLETO.** La migracion
    `007_rls_policies.sql` crea `app_user` con
    `WITH LOGIN PASSWORD 'devpassword_app'` -- una password de
-   desarrollo, en texto plano, en un archivo versionado. Sirve para
-   Docker local, pero es exactamente la que quedaria activa en la base
-   de Render si no se cambia, y esa base esta expuesta a internet.
-   Script nuevo para rotarla: `db/scripts/set-prod-role-password.js
-   <admin_connection_url> <password_nueva>` -- a diferencia de los
-   demas scripts de `db/scripts/`, no lee `ADMIN_DATABASE_URL` del
-   `.env`: la URL admin y la password nuevas se pasan por argumento a
-   proposito, para no depender de (ni pisar) las variables de entorno
-   de desarrollo local. Corre `ALTER ROLE app_user WITH PASSWORD ...`
-   contra la base que se le indique. Pendiente: correrlo contra Render
-   una vez creada la base ahi, y actualizar `DATABASE_URL` en las
-   variables de entorno del backend en Render con la password nueva.
+   desarrollo, en texto plano, en un archivo versionado. Al conectarse
+   por primera vez a la base de Render con `ADMIN_DATABASE_URL` real
+   (para probar el fix de SSL, punto 6) se confirmo que esa base **no
+   estaba vacia**: las migraciones `000` a `009` ya figuraban
+   aplicadas, es decir, `app_user` ya existia ahi con la password
+   hardcodeada, expuesta a internet. Se corrio
+   `db/scripts/set-prod-role-password.js <admin_connection_url>
+   <password_nueva>` con una password nueva generada al azar
+   (`openssl rand -hex 24`, 48 caracteres hex -- sin caracteres que
+   necesiten escape en una connection string) contra la base real de
+   Render. La password nueva se le entrego al usuario para que
+   actualice `DATABASE_URL` a mano en las variables de entorno del
+   backend en Render (con el rol `app_user`, no el admin) y para que
+   la guarde en un gestor de contraseñas -- no quedo guardada en
+   ningun archivo del repo ni de este documento.
+   **Pendiente real:** actualizar esa variable en el dashboard de
+   Render y reiniciar/redeployar el servicio -- hasta entonces, el
+   backend desplegado sigue con la password vieja en su config y va a
+   fallar al conectarse.
 
 6. **Bug real: "SSL/TLS required" al conectar a Render -- corregido en
    todos los puntos de conexion directa a Postgres.** Render exige SSL
@@ -450,6 +509,10 @@ Tres puntos de hardening levantados antes de seguir con features nuevas:
    punto **critico**: sin el fix, el backend desplegado en Render
    fallaria al arrancar con el mismo error, no solo las migraciones
    manuales.
+   **Verificado en vivo**: `node db/scripts/migrate.js` con
+   `ADMIN_DATABASE_URL` apuntando a la base real de Render conecto sin
+   el error "SSL/TLS required" (ver punto 5 -- de paso revelo que esa
+   base ya tenia las 10 migraciones aplicadas de antes).
 
 7. **`BullModule.forRoot()` sin soporte de password/TLS -- corregido.**
    Solo armaba la conexion con `REDIS_HOST`/`REDIS_PORT` sueltos, sin
