@@ -1,18 +1,26 @@
 # Estado del Proyecto — WhatsApp SaaS Platform
 
-Ultima actualizacion: 18 de agosto 2026 -- bug real en produccion
-corregido: con el backend ya desplegado en Render, los mensajes de
-WhatsApp no se procesaban (`No hay ningun tenant conectado al
-phone_number_id ...`) porque Render tenia el esquema (migraciones
+Ultima actualizacion: 19 de agosto 2026 -- cerrado por completo el bug
+#17 (Render sin datos del tenant). Se copio la base de conocimiento
+(RAG) de Tienda Demo A que faltaba: leidos sus `knowledge_sources`/
+`knowledge_chunks` en local (reconstruyendo el documento completo
+desde los fragmentos), resubido via `POST /knowledge/documents` con
+login real contra el backend ya desplegado en Render, y confirmado
+`status: indexed`. Probado de punta a punta con un WhatsApp real
+mandado por el usuario (evitando simular el webhook, por el riesgo de
+restriccion de cuenta con el token real de este tenant): el bot en
+Render contesto el horario real del documento, no una respuesta
+generica -- ver bug #17 en la seccion 4. Antes de eso, bug real en
+produccion corregido: con el backend ya desplegado en Render, los
+mensajes de WhatsApp no se procesaban (`No hay ningun tenant conectado
+al phone_number_id ...`) porque Render tenia el esquema (migraciones
 aplicadas) pero CERO datos -- el onboarding real del tenant solo se
 habia hecho contra la base local. Copiada la fila de tenant + usuario
 dueno + `whatsapp_credentials` (token cifrado, sin desencriptar en
 ningun momento) de local a Render; requirio antes sincronizar
 `ENCRYPTION_KEY` entre ambos entornos. Verificado en vivo que la
-funcion de lookup ya resuelve el tenant en Render -- ver bug #17 en la
-seccion 4. Pendiente real: falta copiar la base de conocimiento (RAG)
-de este tenant y probar un mensaje real de punta a punta contra Render.
-Antes de eso, probado en vivo contra la
+funcion de lookup ya resuelve el tenant en Render. Antes de eso,
+probado en vivo contra la
 base de Render real: el fix de SSL conecta sin error (y de paso revelo
 que esa base ya tenia las 10 migraciones aplicadas de antes, con
 `app_user` usando todavia la password hardcodeada de la migracion
@@ -205,15 +213,34 @@ Celular del usuario
     desencriptar en runtime aunque la fila exista. Verificado en vivo:
     `find_tenant_by_phone_number_id('1241828399019171')` contra Render
     ya devuelve el tenant correcto.
-    **Pendiente real**: los `knowledge_sources`/`knowledge_chunks`
-    (documentos de la base de conocimiento, RAG) de este tenant NO se
-    copiaron -- solo tenant + usuario + credenciales de WhatsApp. Si
-    se le pregunta al bot en Render algo que dependa de un documento
-    subido solo en local, todavia no va a tener esa informacion; hay
-    que volver a subirlos via `POST /knowledge/documents` apuntando a
-    produccion. Tambien falta la prueba real de punta a punta (mandar
-    un WhatsApp de verdad y confirmar que Render responde) -- no se
-    hizo desde esta sesion.
+    **Pendiente real -- YA RESUELTO.** Los `knowledge_sources`/
+    `knowledge_chunks` (documentos de la base de conocimiento, RAG) de
+    este tenant tampoco se habian copiado -- solo tenant + usuario +
+    credenciales de WhatsApp (ver arriba). Se leyo el unico documento
+    de Tienda Demo A en local ("Info de contacto y horarios - Tienda
+    Demo A", 1 solo chunk) reconstruyendo su texto completo desde
+    `knowledge_chunks` (ordenado por `chunk_index`), y se resubio via
+    `POST /knowledge/documents` con login real (`owner@tienda-a.cl`)
+    contra el backend ya desplegado en Render (no localhost) -- misma
+    password de desarrollo documentada en `db/seeds/dev_seed.sql`
+    (`Demo1234!`), que sigue siendo valida en Render porque la fila de
+    `users` (con su hash bcrypt) se copio tal cual en el fix anterior
+    de este mismo bug. Confirmado con `GET /knowledge/documents` en
+    Render: `status: indexed`, `chunk_count: 1`.
+    **Prueba real de punta a punta, ya hecha**: en vez de simular el
+    webhook con un numero inventado (riesgo real de restriccion de
+    cuenta en Meta, como paso antes con este mismo tenant -- ver Fase
+    3 en la seccion 5 -- porque a diferencia de Tienda Demo B, Tienda
+    Demo A tiene un token **real** conectado), se le pidio al usuario
+    mandar un WhatsApp de verdad preguntando el horario. Verificado
+    con `GET /conversations` contra Render: la respuesta del bot fue
+    "Nuestro horario de atencion es de lunes a viernes de 09:00 a
+    18:00 hrs" -- el dato real del documento recien subido, no una
+    respuesta generica. Bug #17 cerrado por completo: tenant, usuario,
+    credenciales de WhatsApp y base de conocimiento ya estan
+    replicados en Render, y el flujo completo (WhatsApp real -> Meta
+    -> Render -> Claude -> RAG -> respuesta -> Meta -> WhatsApp del
+    usuario) esta probado en produccion.
 
 ## 4bis. Hito: bot de WhatsApp funcional de punta a punta
 
