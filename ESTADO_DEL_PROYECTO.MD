@@ -1,6 +1,28 @@
 # Estado del Proyecto — WhatsApp SaaS Platform
 
-Ultima actualizacion: 19 de agosto 2026 -- el dashboard local ya puede
+Ultima actualizacion: 19 de agosto 2026 -- probado de verdad que el
+`.env.local` del dashboard apuntando a produccion funciona (ver el
+parrafo siguiente para el cambio en si). Se creo temporalmente
+`apps/dashboard/.env.local` con
+`NEXT_PUBLIC_API_URL=https://backend-mensajeriaia-saas.onrender.com` y
+se reinicio el servidor de desarrollo (Next.js no recarga env vars en
+caliente, hace falta reiniciar el proceso para que las tome). La
+extension de Chrome (`claude-in-chrome`) seguia sin poder reconectarse
+para probarlo a simple vista en el navegador (van tres intentos fallidos
+en la sesion), asi que se verifico a otro nivel: se leyo directo el
+chunk JS que Next.js le sirve al navegador
+(`/_next/static/chunks/apps_dashboard_*.js`) y se confirmo que
+`process.env.NEXT_PUBLIC_API_URL` quedo compilado ahi como el string
+literal `"https://backend-mensajeriaia-saas.onrender.com"` -- es decir,
+Next.js si inyecto la variable en el bundle que corre en el navegador,
+no solo en el servidor. Sumado a que ese mismo backend ya se habia
+probado funcionando (login de Vuelta Canela, ver la entrada anterior),
+da confianza razonable de que funciona de punta a punta aunque no se
+haya visto clickear el boton "Ingresar" en pantalla. Terminada la
+prueba, se borro `.env.local` y se reinicio el servidor de nuevo -- el
+dashboard volvio a apuntar a `localhost:3001` por defecto, confirmado
+de la misma forma (el chunk ya no tiene `onrender.com`, solo
+`localhost:3001`). Antes de eso, el dashboard local ya puede
 apuntar a producción sin editar codigo. `apps/dashboard/src/lib/api.ts`
 tenia `API_URL` hardcodeado a `http://localhost:3001` -- pasa a leer
 `process.env.NEXT_PUBLIC_API_URL`, con ese mismo valor como fallback si
