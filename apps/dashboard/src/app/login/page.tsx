@@ -20,41 +20,65 @@ export default function LoginPage() {
       saveToken(token);
       router.push('/');
     } catch {
-      setError('Email o contrasena incorrectos.');
+      setError('Email o contraseña incorrectos.');
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-gray-50 text-gray-900">
-      <form onSubmit={handleSubmit} className="bg-white p-8 rounded-lg shadow-md w-full max-w-sm">
-        <h1 className="text-xl font-semibold mb-6 text-gray-900">Iniciar sesion</h1>
-        {error && <p className="text-red-600 text-sm mb-4">{error}</p>}
-        <label className="block text-sm font-medium mb-1 text-gray-800">Email</label>
-        <input
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-          className="w-full border rounded px-3 py-2 mb-4 text-gray-900"
-        />
-        <label className="block text-sm font-medium mb-1 text-gray-800">Contrasena</label>
-        <input
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-          className="w-full border rounded px-3 py-2 mb-6 text-gray-900"
-        />
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full bg-blue-600 text-white rounded py-2 font-medium disabled:opacity-50"
+    <main className="min-h-screen flex items-center justify-center bg-paper px-4">
+      <div className="w-full max-w-sm">
+        <div className="text-center mb-8">
+          <div className="font-serif font-black text-2xl tracking-tight text-ink">
+            Convers<span className="text-accent">a</span>
+          </div>
+          <p className="text-sm text-muted mt-1.5">Panel de administración</p>
+        </div>
+
+        <form
+          onSubmit={handleSubmit}
+          className="bg-card border border-line rounded-lg p-8 shadow-[0_24px_48px_-24px_rgba(18,48,46,0.25)]"
         >
-          {loading ? 'Ingresando...' : 'Ingresar'}
-        </button>
-      </form>
+          <h1 className="font-serif text-xl font-bold text-ink mb-6">Iniciar sesión</h1>
+
+          {error && (
+            <p className="text-sm text-accent bg-accent/10 border border-accent/20 rounded px-3 py-2 mb-4">
+              {error}
+            </p>
+          )}
+
+          <label className="block text-xs font-semibold uppercase tracking-wide text-muted mb-1.5">
+            Email
+          </label>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            className="w-full border border-line rounded px-3 py-2.5 mb-4 bg-white text-ink placeholder:text-muted/60 focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
+          />
+
+          <label className="block text-xs font-semibold uppercase tracking-wide text-muted mb-1.5">
+            Contraseña
+          </label>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            className="w-full border border-line rounded px-3 py-2.5 mb-6 bg-white text-ink placeholder:text-muted/60 focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
+          />
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full bg-accent text-white rounded py-2.5 font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity"
+          >
+            {loading ? 'Ingresando…' : 'Ingresar'}
+          </button>
+        </form>
+      </div>
     </main>
   );
 }

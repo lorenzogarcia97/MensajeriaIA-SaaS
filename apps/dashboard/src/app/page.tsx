@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { fetchConversations, getToken, clearToken, Conversation } from '@/lib/api';
+import { DashboardNav } from '@/components/DashboardNav';
 
 export default function ConversationsPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -27,35 +28,49 @@ export default function ConversationsPage() {
   }
 
   return (
-    <main className="min-h-screen bg-gray-50 p-8 text-gray-900">
-      <div className="max-w-3xl mx-auto">
-        <div className="flex justify-between items-center mb-6">
-          <h1 className="text-xl font-semibold text-gray-900">Conversaciones</h1>
-          <div className="flex items-center gap-4">
-            <a href="/documents" className="text-sm text-gray-700 underline">
-              Documentos
-            </a>
-            <button onClick={handleLogout} className="text-sm text-red-600 underline">
-              Cerrar sesion
-            </button>
-          </div>
+    <main className="min-h-screen bg-paper text-ink">
+      <div className="max-w-3xl mx-auto px-6 py-10">
+        <DashboardNav active="conversations" onLogout={handleLogout} />
+
+        <div className="mb-8">
+          <h1 className="font-serif text-2xl font-bold text-ink">Conversaciones</h1>
+          <p className="text-sm text-muted mt-1">Mensajes recibidos por WhatsApp.</p>
         </div>
 
-        {loading && <p className="text-gray-700">Cargando...</p>}
-        {error && <p className="text-red-600">{error}</p>}
+        {loading && (
+          <div className="flex items-center gap-2.5 text-muted text-sm py-10">
+            <span className="inline-block h-4 w-4 rounded-full border-2 border-line border-t-accent animate-spin" />
+            Cargando conversaciones…
+          </div>
+        )}
+
+        {error && (
+          <p className="text-sm text-accent bg-accent/10 border border-accent/20 rounded px-4 py-3">
+            {error}
+          </p>
+        )}
+
         {!loading && !error && conversations.length === 0 && (
-          <p className="text-gray-500">Todavia no hay conversaciones.</p>
+          <div className="border border-dashed border-line rounded-lg py-16 px-6 text-center">
+            <p className="font-serif text-lg font-semibold text-ink mb-1.5">
+              Todavía no hay conversaciones
+            </p>
+            <p className="text-sm text-muted max-w-sm mx-auto">
+              Cuando un cliente escriba a tu WhatsApp, aparecerá aquí en tiempo real.
+            </p>
+          </div>
         )}
 
         <ul className="space-y-3">
           {conversations.map((conv) => (
-            <li key={conv.id} className="bg-white rounded-lg shadow-sm p-4">
-              <p className="font-medium text-gray-900">
+            <li
+              key={conv.id}
+              className="bg-card border border-line rounded-lg p-4 hover:border-accent/40 transition-colors"
+            >
+              <p className="font-serif font-semibold text-ink">
                 {conv.contactName || conv.contactPhone}
               </p>
-              <p className="text-sm text-gray-600 mt-1">
-                {conv.lastMessage || 'Sin mensajes'}
-              </p>
+              <p className="text-sm text-muted mt-1">{conv.lastMessage || 'Sin mensajes'}</p>
             </li>
           ))}
         </ul>
