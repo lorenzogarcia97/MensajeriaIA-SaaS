@@ -1,6 +1,31 @@
 # Estado del Proyecto — WhatsApp SaaS Platform
 
-Ultima actualizacion: 19 de agosto 2026 -- corregido el bug de UX del
+Ultima actualizacion: 19 de agosto 2026 -- observabilidad basica en el
+backend, antes de seguir sumando features de Fase 4 (ver seccion 9 para
+el detalle completo): SDK oficial de Sentry para NestJS (`@sentry/nestjs`,
+no un paquete de comunidad) capturando tanto excepciones del ciclo HTTP
+como fallos DEFINITIVOS del Worker de BullMQ (`WhatsappIncomingProcessor`
+-- capturados a mano con `Sentry.captureException`, confirmado que la
+instrumentacion automatica NO cubre el Worker por si sola, la misma clase
+de fallo silencioso del bug #16); y un `GET /health` nuevo que chequea
+conectividad REAL a Postgres y Redis (no solo "el proceso esta vivo"),
+con timeout propio por chequeo y `503` si algo falla. Probado forzando
+errores reales (un endpoint temporal, ya borrado, y parando/levantando
+los contenedores de Postgres y Redis a mano) -- `/health` reporto `503`
+en los tres casos de falla y volvio a `200` al restaurar cada servicio.
+**Bug real encontrado en la propia integracion de Sentry, ya corregido**:
+la primera vez que se probo, solo aparecio en Sentry un issue de ejemplo
+(el que crea Sentry solo al crear el proyecto) -- los dos errores de
+prueba forzados NO llegaron. Causa: `instrument.ts` corre ANTES que
+`ConfigModule.forRoot()` (que carga el `.env`), asi que `Sentry.init()`
+se ejecutaba con `dsn: undefined` y el SDK quedaba en modo no-op sin que
+nada lo advirtiera. Corregido cargando el `.env` a mano con `dotenv`
+dentro de `instrument.ts`, con los mismos paths que usa `ConfigModule`.
+Reprobado con los mismos dos errores forzados (mensaje cambiado a
+"REINTENTO 2" para distinguirlos) -- el usuario confirmo en el dashboard
+de Sentry que esta vez SI llegaron los dos. Ver bug #19 y el punto 3 de
+la seccion 9, actualizado.
+Antes de eso, corregido el bug de UX del
 login del dashboard detectado en la sesion anterior: mostraba "Email o
 contraseña incorrectos" para CUALQUIER error, incluida la caida del
 backend. `apps/dashboard/src/lib/api.ts` ahora expone una clase `ApiError`
@@ -131,6 +156,7 @@ punto 3).
 | Cifrado | AES-256-GCM (`CryptoService`, nativo de Node) | Credenciales de integraciones de cada tenant |
 | Testing | Test runner nativo de Node (`node --test`) | Regresion automatizada de RLS |
 | Infra local | Docker Compose (Postgres + Redis) | Entorno de desarrollo reproducible |
+| Observabilidad | Sentry (`@sentry/nestjs`, SDK oficial) + `GET /health` | Captura de errores (HTTP y Worker de BullMQ) + chequeo real de conectividad a Postgres/Redis |
 
 ## 3. Cómo funciona el flujo de un mensaje de WhatsApp (lo que ya esta armado)
 
@@ -306,6 +332,31 @@ Celular del usuario
     `claude-in-chrome`) en los tres escenarios: contraseña incorrecta con
     backend arriba, `fetch` mockeado para simular backend caido, y login
     real exitoso -- los tres muestran el mensaje correcto.
+19. **Corregido: Sentry quedaba en modo no-op porque `instrument.ts`
+    corria antes de que se cargara el `.env`.** Al integrar Sentry (ver
+    seccion 9) y probarlo forzando dos errores reales, en Sentry solo
+    aparecio un issue de ejemplo (el que Sentry crea solo al armar el
+    proyecto) -- ninguno de los dos errores de prueba llego, sin ningun
+    mensaje de error que lo advirtiera. Causa: `apps/backend/src/main.ts`
+    hace `import './instrument'` como primera linea (requisito del SDK),
+    y `instrument.ts` llama a `Sentry.init({ dsn: process.env.SENTRY_DSN
+    })` en el momento en que se importa -- pero `process.env.SENTRY_DSN`
+    todavia no existia en ese punto, porque quien carga el `.env` es
+    `ConfigModule.forRoot()` dentro de `AppModule`, y `AppModule` se
+    importa DESPUES de `instrument.ts` en el mismo `main.ts`. El SDK de
+    Sentry, inicializado con `dsn: undefined`, arranca en modo no-op por
+    diseno (para no romper el arranque si falta la variable) -- silencioso
+    a proposito, lo que lo hizo dificil de notar sin probar de verdad con
+    un error forzado. **Corregido**: `instrument.ts` ahora carga el `.env`
+    el mismo con `dotenv.config()` (paquete agregado como dependencia
+    directa del backend, antes solo transitivo via `@nestjs/config`),
+    usando los mismos dos paths que `ConfigModule.forRoot()`, ANTES de
+    llamar a `Sentry.init()`. Reprobado forzando los mismos dos errores
+    de nuevo: el stack trace en los logs del backend paso a mostrar
+    frames de `@sentry/nestjs`/`@sentry/opentelemetry` envolviendo la
+    llamada (senal de que el SDK esta instrumentando de verdad, cosa que
+    no aparecia antes), y el usuario confirmo en el dashboard de Sentry
+    que esta vez llegaron los dos issues.
 
 ## 4bis. Hito: bot de WhatsApp funcional de punta a punta
 
@@ -454,7 +505,10 @@ padre -- no confundir con `apps/dashboard`):
         se confirmo el resultado en la tabla `messages` -- no quedo
         ningun cambio de comportamiento en el repo.
 
-**Fase 4:** produccion/escalado -- sin tocar todavia.
+**Fase 4:** produccion/escalado -- EN CURSO.
+- [x] Observabilidad basica: Sentry (SDK oficial `@sentry/nestjs`) +
+      `GET /health` con chequeo real de Postgres/Redis. Ver seccion 9.
+- [ ] El resto de produccion/escalado: sin tocar todavia.
 
 ## 6. Notas operativas utiles
 
@@ -661,6 +715,7 @@ Tres puntos de hardening levantados antes de seguir con features nuevas:
    | `ANTHROPIC_API_KEY` | Si | Llamadas a Claude (`ClaudeService`) | |
    | `VOYAGE_API_KEY` | Si | Embeddings para RAG (`VoyageService`) | De la cuenta independiente `dash.voyageai.com`, NO la key de "AI Models" de MongoDB Atlas (ver seccion 6). |
    | `WHATSAPP_VERIFY_TOKEN` | Si | Handshake de verificacion del webhook con Meta | Cualquier texto propio; tiene que coincidir con el que se configure en Meta (Graph API Explorer / App dashboard). |
+   | `SENTRY_DSN` | No (recomendada) | DSN del proyecto de Sentry (`instrument.ts`) | Si se deja vacia, el SDK arranca en modo no-op: no manda nada, pero no rompe el arranque. Ver seccion 9. |
    | `PORT` | No | Puerto en el que escucha el backend (`main.ts`) | Render lo inyecta solo para servicios web -- no hace falta declararlo a mano; si se declara igual, no pasa nada porque el fallback es el mismo mecanismo (`process.env.PORT`). |
    | `ADMIN_DATABASE_URL` | No (no la lee el backend en runtime) | Rol admin para correr migraciones (`db/scripts/migrate.js`) y los demas scripts de `db/scripts/` | No es una variable del servicio backend en Render -- hace falta tenerla a mano (en el `.env` local, apuntando a la base de Render) para correr las migraciones contra esa base la primera vez, y para `set-prod-role-password.js`. |
 
@@ -668,3 +723,130 @@ Tres puntos de hardening levantados antes de seguir con features nuevas:
    variables de entorno -- viven cifradas en la tabla
    `whatsapp_credentials`, cargadas con `set-whatsapp-token.js` u
    `onboard-tenant.js`.
+
+## 9. Observabilidad basica (Fase 4, antes de sumar mas features)
+
+Con Fase 1-3 completas y probadas en produccion, antes de seguir sumando
+funcionalidad se sumo observabilidad minima al backend: saber cuando algo
+se rompe (Sentry) y poder chequear si el servicio esta realmente sano
+(`/health`), no solo si el proceso sigue vivo.
+
+1. **Sentry -- SDK oficial de NestJS, no un paquete de comunidad.**
+   Se instalo `@sentry/nestjs` (la documentacion vigente esta en
+   `docs.sentry.io/platforms/javascript/guides/nestjs/` -- se consulto en
+   vivo para esta integracion en vez de asumir una API vieja, porque
+   Sentry cambio su recomendacion oficial para Nest mas de una vez;
+   paquetes de comunidad como `nestjs-sentry`/`nest-raven` estan
+   descontinuados y no se usaron).
+   - `apps/backend/src/instrument.ts` (nuevo): carga el `.env` a mano
+     con `dotenv.config()` (mismos paths que `ConfigModule.forRoot()`)
+     y RECIEN despues llama a `Sentry.init({ dsn: process.env.SENTRY_DSN,
+     tracesSampleRate: 1.0 })`. El `dotenv.config()` manual es
+     necesario -- ver bug #19 en la seccion 4 -- porque este archivo se
+     importa antes que `AppModule`/`ConfigModule`, asi que sin el, el
+     DSN todavia no existiria en `process.env` en el momento del
+     `Sentry.init()`. Si `SENTRY_DSN` sigue sin definirse despues de
+     cargar el `.env`, el SDK arranca en modo no-op -- no manda nada,
+     pero tampoco rompe el arranque en local.
+   - `apps/backend/src/main.ts`: `import './instrument'` como la
+     PRIMERA linea del archivo, antes que cualquier otro import --
+     requisito del SDK para poder instrumentar el resto de las
+     librerias al cargarse.
+   - `apps/backend/src/app.module.ts`: `SentryModule.forRoot()` como el
+     primer import del modulo, y `SentryGlobalFilter` como el primer
+     `APP_FILTER` (antes del `TenantInterceptor`, que es un
+     `APP_INTERCEPTOR` distinto) -- captura cualquier excepcion no
+     manejada del ciclo HTTP y la manda a Sentry antes de devolver la
+     respuesta de error al cliente.
+   - **El Worker de BullMQ necesita captura manual -- confirmado, no
+     asumido.** `WhatsappIncomingProcessor` corre fuera de cualquier
+     request HTTP (la misma razon de fondo del bug #16), asi que la
+     instrumentacion automatica de Sentry para Nest -- pensada para el
+     ciclo de vida de un request -- NO lo cubre sola. Se investigo la
+     documentacion de integraciones de Sentry en vivo y se confirmo:
+     no existe integracion automatica para BullMQ/Bull. Se agrego
+     `Sentry.captureException(error)` a mano dentro del
+     `@OnWorkerEvent('failed')` que ya existia en
+     `whatsapp-incoming.processor.ts`, solo en la rama de fallo
+     DEFINITIVO (cuando `job.attemptsMade >= maxAttempts`, la misma
+     rama que ya logueaba `logger.error` en vez de `logger.warn`) --
+     los reintentos intermedios no generan ruido en Sentry, solo el
+     que ya se rindio y necesita que alguien lo mire. Envuelto en
+     `Sentry.withIsolationScope()` (recomendacion oficial para jobs de
+     background) con el contexto del job (queue, jobId, attemptsMade,
+     jobData) para que un evento no contamine el scope de otro job que
+     se procese despues en el mismo Worker.
+
+2. **`GET /health` -- chequeo real de Postgres y Redis, no solo
+   "el proceso esta vivo".** Modulo nuevo `apps/backend/src/health/`
+   (`HealthModule` + `HealthController`), sin `@nestjs/terminus` --
+   con solo dos chequeos y sin ningun indicador built-in de Terminus
+   para Redis (hay que escribir uno a mano de todos modos), un
+   controller simple resulto mas directo que sumar la dependencia.
+   - Postgres: `dataSource.query('SELECT 1')` via el `DataSource` de
+     TypeORM (ya global gracias a `TypeOrmCoreModule`, que Nest marca
+     `@Global()` internamente -- no hizo falta reimportar
+     `TypeOrmModule`).
+   - Redis: se reutiliza la MISMA conexion que ya usa BullMQ para la
+     cola `whatsapp-incoming`, inyectando la `Queue` (`@InjectQueue`) y
+     llamando a `(await queue.client).info()` -- se probo `ping()`
+     primero, pero la interfaz `IRedisClient` que expone bullmq (para
+     poder soportar tambien node-redis y el Redis nativo de Bun, no
+     solo ioredis) no la declara; `info()` si esta declarada y fuerza
+     el mismo viaje de ida y vuelta real a Redis. Para esto,
+     `whatsapp.module.ts` ahora exporta `BullModule` (`exports:
+     [BullModule]`) y `HealthModule` importa `WhatsappModule` -- evita
+     abrir una segunda conexion a Redis solo para el healthcheck.
+   - Cada chequeo corre con su propio timeout de 3 segundos
+     (`Promise.race`): si Postgres o Redis estan realmente caidos (no
+     solo lentos), el driver puede quedarse reintentando en silencio en
+     vez de fallar rapido -- sin este limite, `/health` podria colgarse
+     indefinidamente en vez de reportar el error.
+   - Si cualquiera de los dos falla, responde `503 Service Unavailable`
+     con el detalle de cual fallo y por que -- nunca `200` a medias.
+   - **Probado real, parando y levantando los contenedores de Docker a
+     mano** (no solo revisando el codigo): con Redis parado, `/health`
+     devolvio `503` con `redis: { status: "error", message: "Timeout
+     tras 3000ms" }` y `postgres: "ok"`; al levantar Redis de nuevo,
+     `/health` tardo unos segundos en volver a `200` (el tiempo que
+     tarda el cliente ioredis interno en reconectar solo, con su propio
+     backoff -- comportamiento esperado, no un bug). Mismo resultado
+     simetrico parando/levantando Postgres.
+
+3. **Prueba real de que los errores llegan a Sentry -- CONFIRMADO, en
+   el dashboard de verdad, tras encontrar y corregir un bug en el
+   camino.** Se agrego temporalmente un endpoint de prueba
+   (`GET /test/http-error`, que lanzaba una excepcion sincrona en un
+   controller) y una forma de forzar un fallo DEFINITIVO del Worker
+   (`GET /test/worker-error`, que encolaba un job con `attempts: 1` y
+   una bandera que hacia que `WhatsappIncomingProcessor.process()`
+   lanzara un error a proposito, sin tocar `WhatsappService` ni pegarle
+   a Meta/Claude de verdad). **Primer intento**: ambos errores se
+   dispararon y quedaron en el log del backend, pero en Sentry solo
+   aparecio el issue de ejemplo que el propio Sentry crea al armar el
+   proyecto -- los dos de prueba no llegaron. Investigado y corregido
+   (bug #19 en la seccion 4): `instrument.ts` inicializaba Sentry ANTES
+   de que `ConfigModule` cargara el `.env`, asi que `SENTRY_DSN` estaba
+   vacio en ese momento y el SDK quedo en modo no-op sin avisar.
+   **Segundo intento, ya con el fix**: mismos dos errores forzados de
+   nuevo (mensaje cambiado a "REINTENTO 2" para distinguirlos de
+   cualquier resto del primer intento) -- el usuario confirmo en el
+   dashboard de Sentry que esta vez SI aparecieron los dos issues.
+   Todo el codigo de prueba (`_test-trigger.controller.ts`, la bandera
+   `__forceTestError` en el processor, y su registro en
+   `whatsapp.module.ts`) se elimino del repo despues -- no queda ningun
+   endpoint de prueba.
+
+4. **Variables de entorno nuevas**: `SENTRY_DSN` agregada a
+   `.env.example` (vacia, como el resto de las keys de servicios
+   externos) y a la tabla de variables de Render (seccion 8, punto 8) --
+   opcional mas no esta de mas: si se deja vacia, Sentry simplemente no
+   manda nada.
+
+5. **Dependencias nuevas del backend**: `@sentry/nestjs` (el SDK) y
+   `dotenv` -- esta ultima ya era una dependencia transitiva (via
+   `@nestjs/config`), pero se agrego como dependencia DIRECTA del
+   `package.json` de `apps/backend` porque ahora `instrument.ts` la usa
+   explicitamente (mismo criterio que ya se aplico antes con `pg` en la
+   raiz del repo, ver bug #15 en la seccion 4: si el codigo la importa
+   de verdad, tiene que estar declarada, no solo colgar de otro paquete).

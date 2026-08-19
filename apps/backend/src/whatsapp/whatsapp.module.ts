@@ -27,5 +27,9 @@ import { WHATSAPP_INCOMING_QUEUE } from './whatsapp.constants';
   ],
   controllers: [WhatsappController],
   providers: [WhatsappService, WhatsappIncomingProcessor],
+  // Reexporta el BullModule de la cola para que HealthModule pueda
+  // inyectar la misma Queue y chequear la conexion real a Redis sin
+  // abrir una segunda conexion aparte.
+  exports: [BullModule],
 })
 export class WhatsappModule {}

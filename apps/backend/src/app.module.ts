@@ -1,9 +1,10 @@
 import { join } from 'path';
 import { Module } from '@nestjs/common';
-import { APP_INTERCEPTOR } from '@nestjs/core';
+import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { BullModule } from '@nestjs/bullmq';
+import { SentryModule, SentryGlobalFilter } from '@sentry/nestjs/setup';
 import { TenantInterceptor } from './common/interceptors/tenant.interceptor';
 import { getPgSslConfig } from './common/config/pg-ssl.util';
 import { getRedisConnectionOptions } from './common/config/redis-connection.util';
@@ -15,9 +16,11 @@ import { WhatsappModule } from './whatsapp/whatsapp.module';
 import { KnowledgeModule } from './knowledge/knowledge.module';
 import { IntegrationsModule } from './integrations/integrations.module';
 import { MockInventoryModule } from './mock-inventory/mock-inventory.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
+    SentryModule.forRoot(),
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: [
@@ -43,8 +46,13 @@ import { MockInventoryModule } from './mock-inventory/mock-inventory.module';
     KnowledgeModule,
     IntegrationsModule,
     MockInventoryModule,
+    HealthModule,
   ],
   providers: [
+    {
+      provide: APP_FILTER,
+      useClass: SentryGlobalFilter,
+    },
     {
       provide: APP_INTERCEPTOR,
       useClass: TenantInterceptor,
