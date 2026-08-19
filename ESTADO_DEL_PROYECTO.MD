@@ -1,6 +1,21 @@
 # Estado del Proyecto — WhatsApp SaaS Platform
 
-Ultima actualizacion: 19 de agosto 2026 -- segundo tenant real onboardeado
+Ultima actualizacion: 19 de agosto 2026 -- el dashboard local ya puede
+apuntar a producción sin editar codigo. `apps/dashboard/src/lib/api.ts`
+tenia `API_URL` hardcodeado a `http://localhost:3001` -- pasa a leer
+`process.env.NEXT_PUBLIC_API_URL`, con ese mismo valor como fallback si
+la variable no esta definida, asi que el desarrollo normal sigue
+funcionando exactamente igual sin ningun cambio de config. Se agrego
+`apps/dashboard/.env.local.example` (con el comentario de como usarlo:
+copiar a `.env.local` -- gitignored -- y poner
+`NEXT_PUBLIC_API_URL=https://backend-mensajeriaia-saas.onrender.com`
+para apuntar a Render, por ejemplo para probar el tenant real "Vuelta
+Canela" sin levantar el backend local). El `.gitignore` del dashboard
+tenia `.env*` (bloquea TODO archivo que empiece con `.env`, incluido el
+`.example`) -- se agrego una excepcion `!.env.local.example` para que
+el archivo de ejemplo si quede versionado. Verificado que el dashboard
+sigue compilando y sirviendo `/login` sin errores tras el cambio.
+Antes de eso, segundo tenant real onboardeado
 en PRODUCCION (Render), "Vuelta Canela": un cliente real (no una prueba
 de aislamiento) que va a probar el contenido/dashboard antes de conectar
 su numero oficial de WhatsApp. Corrido `db/scripts/onboard-tenant.js`
@@ -565,6 +580,11 @@ padre -- no confundir con `apps/dashboard`):
 - El repo tiene `pnpm-workspace.yaml`, pero por ahora se sigue
   trabajando con `npm` (cada app con su propio `node_modules`
   independiente) -- no se migro a pnpm todavia.
+- Para que el dashboard local apunte a produccion (Render) en vez de al
+  backend local: copiar `apps/dashboard/.env.local.example` a
+  `.env.local` (gitignored) y descomentar `NEXT_PUBLIC_API_URL`. Sin
+  ese archivo, sigue apuntando a `http://localhost:3001` por defecto --
+  no hace falta tocar nada para el desarrollo normal.
 
 ## 7. Endurecimiento antes de sumar mas funcionalidad
 
