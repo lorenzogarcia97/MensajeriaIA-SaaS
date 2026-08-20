@@ -101,6 +101,29 @@ export async function uploadDocument(
   return res.json();
 }
 
+export async function uploadDocumentFile(
+  file: File,
+  displayName: string,
+): Promise<{ sourceId: string; chunkCount: number }> {
+  const token = getToken();
+  if (!token) throw new Error('No hay sesion activa');
+
+  const formData = new FormData();
+  formData.append('file', file);
+  if (displayName) formData.append('displayName', displayName);
+
+  const res = await fetch(`${API_URL}/knowledge/documents/upload`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: formData,
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    throw new Error(data?.message || 'No se pudo subir el archivo');
+  }
+  return res.json();
+}
+
 export async function deleteDocument(id: string): Promise<void> {
   const token = getToken();
   if (!token) throw new Error('No hay sesion activa');

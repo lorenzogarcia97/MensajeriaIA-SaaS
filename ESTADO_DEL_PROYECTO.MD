@@ -224,6 +224,7 @@ punto 3).
 | Testing | Test runner nativo de Node (`node --test`) | Regresion automatizada de RLS |
 | Infra local | Docker Compose (Postgres + Redis) | Entorno de desarrollo reproducible |
 | Observabilidad | Sentry (`@sentry/nestjs`, SDK oficial) + `GET /health` | Captura de errores (HTTP y Worker de BullMQ) + chequeo real de conectividad a Postgres/Redis |
+| Extraccion de texto de archivos | `pdf-parse` (PDF), `mammoth` (DOCX), `xlsx`/SheetJS (Excel, instalado desde `cdn.sheetjs.com`, no desde npm -- ver seccion 11) | Convertir un archivo real subido en `/documents` a texto plano para el mismo pipeline de chunking + embeddings |
 
 ## 3. Cómo funciona el flujo de un mensaje de WhatsApp (lo que ya esta armado)
 
@@ -442,9 +443,10 @@ probada con datos reales, no solo con seeds de prueba.
 ## 4ter. Dashboard extendido
 
 Se agrego una pagina `/documents` al dashboard: subir documentos (nombre
-+ texto), ver la lista con su estado, y borrarlos -- todo desde el
-navegador, sin necesitar PowerShell. Link cruzado con `/` (conversaciones)
-para moverse entre las dos pantallas.
++ texto, o un archivo PDF/DOCX/XLSX real -- ver seccion 11), ver la
+lista con su estado, y borrarlos -- todo desde el navegador, sin
+necesitar PowerShell. Link cruzado con `/` (conversaciones) para
+moverse entre las dos pantallas.
 
 ## 4quater. Rediseño visual del dashboard (identidad "Conversa")
 
@@ -487,7 +489,9 @@ padre -- no confundir con `apps/dashboard`):
 - [x] Pipeline de ingesta de documentos: `POST /knowledge/documents`
       (chunking por parrafos con overlap, embeddings via Voyage AI
       voyage-4, guardado en knowledge_chunks) -- **probado real**,
-      primer documento indexado correctamente.
+      primer documento indexado correctamente. Extendido despues con
+      `POST /knowledge/documents/upload` para subir un archivo real
+      (PDF/DOCX/XLSX) en vez de pegar texto a mano -- ver seccion 11.
 - [x] Busqueda semantica con pgvector (distancia coseno `<=>`, usa el
       indice HNSW) + tool `search_knowledge_base` conectada a Claude.
       **Probado real**: Claude decidio por si mismo buscar, encontro
@@ -956,3 +960,215 @@ valido con el `tenantId` correcto, y `GET /conversations` respondio `[]`
 (esperado, tenant nuevo). `ADMIN_DATABASE_URL` quedo guardada en el
 `.env` local (gitignored, no en el repo) para reutilizarla en la
 proxima sesion sin tener que pedirla de nuevo.
+
+## 11. Subida de archivos reales (PDF/DOCX/XLSX) a la base de conocimiento
+
+Hasta ahora `/documents` solo aceptaba texto pegado a mano
+(`POST /knowledge/documents`). Se agrego la posibilidad de subir un
+archivo real -- PDF, DOCX o XLSX -- sin duplicar el pipeline existente
+de chunking + embeddings.
+
+- **Backend** (`apps/backend/src/knowledge/`):
+  - `document-parser.ts` (nuevo): detecta el tipo de archivo por
+    mimetype (con fallback a la extension) y extrae texto plano con el
+    parser correspondiente -- `pdf-parse` v2 (API por clases,
+    `new PDFParse({ data: buffer }).getText()`, reescritura activa de
+    2025 en TypeScript puro, no el `pdf-parse` v1 clasico que estaba
+    abandonado), `mammoth` (`extractRawText`) para DOCX, y `xlsx`
+    (SheetJS) para XLSX, convirtiendo cada hoja a CSV con
+    `sheet_to_csv`. Errores esperados (PDF con password, archivo
+    corrupto, formato no soportado) se traducen a `BadRequestException`
+    con mensaje claro -- nunca un 500 generico.
+  - **Nota de instalacion**: `xlsx` NO se instalo desde el registro de
+    npm -- SheetJS dejo de publicar ahi (la ultima version publica es
+    la 0.18.5, de hace varios anos) y movio la distribucion a su propio
+    CDN tras un conflicto con npm, Inc. Se instalo con
+    `npm install --save https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz`,
+    que es lo que la documentacion oficial de SheetJS recomienda hoy.
+    `pdf-parse` (2.4.5) y `mammoth` (1.12.1) si vienen del registro
+    normal de npm, son las versiones vigentes.
+  - `KnowledgeService.ingestDocument()` ahora acepta un tercer
+    parametro opcional `sourceType` (default `'manual_text'`, para no
+    romper el endpoint viejo) -- el mismo metodo de chunking +
+    embeddings se reutiliza tal cual para texto pegado a mano y para
+    texto extraido de un archivo.
+  - Endpoint nuevo `POST /knowledge/documents/upload`
+    (`multipart/form-data`, campo `file` + `displayName` opcional,
+    `FileInterceptor` de `@nestjs/platform-express` con
+    `memoryStorage()` y limite de 10MB -- excederlo devuelve `413`, no
+    un timeout ni un 500). El endpoint viejo `POST /knowledge/documents`
+    (texto pegado a mano) no se toco.
+  - Migracion `010_knowledge_sources_xlsx.sql`: el `CHECK` de
+    `knowledge_sources.source_type` (migracion 003) no incluia
+    `'xlsx'` -- solo se penso originalmente para `'pdf'`, `'docx'`,
+    `'csv'`, `'url'`, `'manual_text'`. Aplicada contra el Postgres
+    local (Docker); **NO aplicada todavia contra produccion (Render)**
+    -- hace falta correr
+    `ADMIN_DATABASE_URL=<url de Render> node db/scripts/migrate.js`
+    antes de que este feature funcione ahi.
+- **Frontend** (`apps/dashboard/src/app/documents/page.tsx`): la
+  tarjeta de "Subir un documento nuevo" ahora tiene un toggle
+  "Pegar texto" / "Subir archivo" (mismo patron visual "Conversa" que
+  el resto del dashboard) en vez de mostrar el textarea y el selector
+  de archivo a la vez. En modo archivo, el input acepta
+  `.pdf,.docx,.xlsx,.xls`, valida el limite de 10MB en el cliente antes
+  de mandar el request, muestra el nombre del archivo elegido, y el
+  boton cambia a "Procesando archivo... puede tardar unos segundos"
+  mientras dura el parsing + embeddings. `lib/api.ts` suma
+  `uploadDocumentFile()`, que arma un `FormData` y lo manda sin fijar
+  `Content-Type` a mano (el browser pone el boundary del multipart
+  solo).
+- **Probado real**, contra el backend local (`nest start --watch`,
+  Postgres/Redis de Docker) con el usuario sembrado `owner@tienda-a.cl`:
+  - Se generaron un PDF, un DOCX y un XLSX de verdad (no mocks) con un
+    dato distintivo cada uno (un codigo, un horario, un SKU) y se
+    subieron los tres via `POST /knowledge/documents/upload` real
+    (`curl` multipart) -- los tres respondieron `201` con
+    `chunkCount >= 1`.
+  - `GET /knowledge/documents` confirmo `status: "indexed"` para los
+    tres.
+  - No existe un endpoint `POST /conversations/test-message` en este
+    repo (se verifico antes de asumirlo), asi que la recuperacion
+    semantica se probo directo contra el mismo pipeline que usa
+    `KnowledgeSearchService` en produccion: embeddings reales via
+    Voyage AI (`voyage-4`) + busqueda por coseno en pgvector, con tres
+    preguntas en espanol (una por archivo). Las tres devolvieron como
+    resultado top exactamente el fragmento correcto -- incluido el dato
+    distintivo de cada archivo -- confirmando que el texto extraido de
+    cada formato realmente queda indexado y es recuperable, no solo
+    que el estado quedo en "indexed".
+  - Se probaron tambien los casos de error: archivo `.txt` (formato no
+    soportado) y un PDF corrupto (bytes aleatorios) -- ambos devolvieron
+    `400` con mensaje claro, no `500`. Un archivo de 11MB devolvio
+    `413`.
+  - Los tres documentos de prueba se borraron despues (`DELETE
+    /knowledge/documents/:id`) para no dejar basura en la base de
+    datos local de desarrollo.
+
+## 12. Vision de Claude para contenido visual en documentos (organigramas, diagramas, graficos)
+
+El pipeline de la seccion 11 extraia solo texto plano -- un organigrama,
+un diagrama de flujo o un grafico embebido en un PDF/DOCX/XLSX se
+perdian por completo, o quedaban como palabras sueltas sin relacion
+(ej. "CEO CTO CFO" en vez de "CTO y CFO dependen del CEO"). Se agrego
+una segunda pasada con **Claude Vision (Haiku 4.5)** que interpreta esas
+partes visuales antes de indexar, reutilizando el mismo
+`ANTHROPIC_API_KEY` que ya usa `ClaudeService` para las respuestas de
+WhatsApp.
+
+- **Servicio nuevo** `apps/backend/src/ai/vision.service.ts`
+  (`VisionService`, agregado a `AiModule`): recibe una imagen (buffer +
+  mimetype) y una etiqueta de contexto, y le pide a Claude una
+  descripcion estructurada ("X depende de Y", "el proceso va de A a B a
+  C"). Usa `claude-haiku-4-5` a proposito -- es una tarea de
+  descripcion, no de razonamiento, y Haiku alcanza sobrado (el usuario
+  pidio explicitamente evaluar Haiku para esto). Si la llamada falla
+  (rate limit, etc.) devuelve string vacio en vez de tirar una
+  excepcion -- una descripcion visual que falla no debe tirar abajo la
+  indexacion del resto del documento.
+- **PDF** (`document-parser.ts` → `extractPdfText`): ademas de
+  `pdf-parse` para el texto, se usa el propio `getScreenshot()` de
+  `pdf-parse` (ya trae `@napi-rs/canvas` + `pdfjs-dist` como
+  dependencia -- **no hizo falta investigar ni sumar una libreria nueva
+  de PDF-a-imagen**, fue la opcion mas simple e integrada) para
+  renderizar a PNG cualquier pagina que dispare la heuristica de
+  "pagina visual": texto extraido por debajo de 200 caracteres, o
+  imagenes embebidas detectadas via `getImage()`. Esas paginas (y solo
+  esas, via `partial: [...]` para no renderizar el documento entero) se
+  mandan a `VisionService`, y la descripcion se agrega al texto de esa
+  pagina antes del chunking. El umbral de 200 caracteres es una
+  heuristica barata a proposito, no exacta -- puede disparar vision de
+  mas en una pagina de titulo casi vacia, pero nunca se queda callada
+  sobre un organigrama.
+- **DOCX**: `mammoth` sigue extrayendo el texto, pero no describe
+  imagenes/SmartArt embebidos. Como un `.docx` es en el fondo un
+  `.zip`, se abre aparte con `jszip` (ya era dependencia transitiva de
+  `mammoth`/`xlsx`, tampoco hizo falta sumarla) y se buscan las
+  imagenes reales en `word/media/` -- cada una se manda a
+  `VisionService` y su descripcion se agrega al texto.
+- **XLSX**: `xlsx`/SheetJS ya captura filas/columnas como texto, asi
+  que **no** se le aplica vision a tablas normales (tal como pidio el
+  usuario). Solo se procesa lo que SheetJS deja afuera de su modelo de
+  celdas:
+  - Imagenes raster pegadas en la hoja (`xl/media/`, mismo mecanismo
+    que en DOCX) → vision completa.
+  - Graficos nativos de Excel (`xl/charts/chartN.xml`, un grafico de
+    verdad, no una tabla) → **no se renderizan a imagen** (rasterizar
+    un grafico nativo de Office exige un motor de render como
+    LibreOffice headless, fuera de alcance para este backend); en su
+    lugar se extrae un resumen liviano (titulo, etiquetas, valores) por
+    regex directo del XML del grafico, que ya trae los valores
+    cacheados por Excel (`<c:v>`) -- en la practica mas preciso para
+    responder preguntas que pedirle a un modelo de vision que lea
+    numeros de una imagen renderizada. Esta parte del codigo
+    (`summarizeChartXml`) esta implementada pero **no se probo con un
+    grafico nativo real** -- construir a mano un XML de grafico de
+    Excel valido no valia el tiempo para esta prueba; validarla con un
+    `.xlsx` real exportado desde Excel/LibreOffice con un grafico de
+    verdad queda pendiente.
+
+**Costo y tiempo aproximado** (lo que pidio el usuario, medido con
+llamadas reales a Haiku 4.5, no estimado a ojo):
+
+- Cada pagina/imagen que dispara vision cuesta aproximadamente
+  **1500-1650 tokens de entrada** (una pagina completa renderizada
+  entra en el tope de 1568 tokens visuales de Haiku 4.5 -- "resolution
+  tier" estandar, no la de alta resolucion que solo tienen los modelos
+  4.7+, asi que el costo por pagina es esencialmente fijo mas alla de
+  a que resolucion se renderice) + un system prompt corto, y genera
+  entre **90 y 150 tokens de salida** para una descripcion util. A
+  $1/$5 por millon de tokens de Haiku 4.5, eso es **~$0.002-0.003 USD
+  por pagina/imagen visual** -- menos de un tercio de centavo.
+  - Documento tipico (5-10 paginas, 1-3 realmente visuales: una
+    portada, un organigrama, un diagrama): **+$0.003 a $0.01 USD**
+    sobre el costo de embeddings que ya existia.
+  - Caso extremo (documento largo, todas las paginas disparan vision):
+    a ~$0.0025 por pagina, un documento de 20 paginas serian
+    **~$0.05 USD**.
+- Tiempo: cada llamada a Haiku tomo entre **2 y 3 segundos reales** en
+  las pruebas de esta seccion. Se procesan **secuencialmente, una
+  pagina/imagen a la vez** (no en paralelo) -- mas simple y evita
+  pegarle al rate limit de la API de golpe, a costa de que un documento
+  con muchas paginas visuales tarda proporcionalmente mas. Una pagina
+  de puro texto (sin disparar vision) agrega prácticamente 0 segundos
+  extra sobre el pipeline anterior.
+  - Documento tipico (1-3 paginas visuales): **+3 a 9 segundos**
+    sobre el tiempo de subida que ya existia.
+  - Caso extremo (20 paginas, todas visuales): **+40 a 60 segundos**.
+    El frontend ya muestra "Procesando archivo... puede tardar unos
+    segundos" durante la subida (seccion 11) -- para documentos largos
+    con mucho contenido visual esa espera puede acercarse al minuto, no
+    quedar en "unos segundos"; si esto se vuelve un problema real vale
+    la pena paralelizar las llamadas a Haiku (con un limite de
+    concurrencia) en vez de procesarlas una por una.
+
+**Probado real** (backend local, con `ANTHROPIC_API_KEY` y
+`VOYAGE_API_KEY` reales, nada mockeado):
+
+- PDF de 2 paginas armado a mano: pagina 1 con un organigrama dibujado
+  con vectores (rectangulos + lineas, PostScript/PDF crudo, sin
+  libreria) y solo 3 etiquetas cortas ("CEO", "CTO", "CFO"); pagina 2
+  con un parrafo de texto normal (~155 caracteres). Subida real via
+  `POST /knowledge/documents/upload`: la pagina 1 disparo vision y la
+  descripcion generada por Haiku identifico correctamente la jerarquia
+  ("CTO y CFO dependen directamente del CEO"). Un query semantico real
+  contra pgvector ("¿Quienes dependen directamente del CEO segun el
+  organigrama?") devolvio ese fragmento como resultado top, confirmando
+  que la relacion extraida por vision -- no solo el texto plano -- es
+  la que responde la pregunta.
+- PDF de una pagina con 658 caracteres de texto de politica de
+  devoluciones (sin nada visual): la subida tardo 0.37s, contra 4.8s
+  del PDF anterior con dos paginas visuales -- confirma que el
+  heuristico de texto escaso NO dispara vision de mas en una pagina de
+  texto normal, importante para no encarecer la subida de documentos
+  comunes.
+- DOCX con un parrafo de texto + una imagen real incrustada en
+  `word/media/` (un diagrama de flujo generado con `@napi-rs/canvas`:
+  "Pedido → Preparacion → Entrega"): la descripcion de Haiku reprodujo
+  exactamente esa secuencia en formato "A → B → C".
+- XLSX con una tabla normal + la misma imagen incrustada en
+  `xl/media/`: la tabla se extrajo como texto/CSV (sin vision, como se
+  pidio) y la imagen aparte con vision -- ambos coexistiendo en el
+  mismo documento indexado.
+- Los cuatro documentos de prueba se borraron despues de verificar
+  (`DELETE /knowledge/documents/:id`), igual que en la seccion 11.

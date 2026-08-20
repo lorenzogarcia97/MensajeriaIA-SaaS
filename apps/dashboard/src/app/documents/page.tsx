@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState, FormEvent } from 'react';
+import { useEffect, useState, FormEvent, ChangeEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   fetchDocuments,
   uploadDocument,
+  uploadDocumentFile,
   deleteDocument,
   getToken,
   clearToken,
@@ -12,12 +13,18 @@ import {
 } from '@/lib/api';
 import { DashboardNav } from '@/components/DashboardNav';
 
+const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
+
+type UploadMode = 'text' | 'file';
+
 export default function DocumentsPage() {
   const [documents, setDocuments] = useState<KnowledgeDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [mode, setMode] = useState<UploadMode>('text');
   const [displayName, setDisplayName] = useState('');
   const [content, setContent] = useState('');
+  const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
   const router = useRouter();
@@ -49,17 +56,42 @@ export default function DocumentsPage() {
     router.push('/login');
   }
 
+  function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
+    const selected = e.target.files?.[0] ?? null;
+    setUploadError('');
+    if (selected && selected.size > MAX_FILE_SIZE_BYTES) {
+      setUploadError('El archivo supera el limite de 10MB.');
+      setFile(null);
+      e.target.value = '';
+      return;
+    }
+    setFile(selected);
+  }
+
   async function handleUpload(e: FormEvent) {
     e.preventDefault();
     setUploadError('');
     setUploading(true);
     try {
-      await uploadDocument(displayName, content);
+      if (mode === 'file') {
+        if (!file) {
+          setUploadError('Elegi un archivo para subir.');
+          return;
+        }
+        await uploadDocumentFile(file, displayName);
+        setFile(null);
+      } else {
+        await uploadDocument(displayName, content);
+        setContent('');
+      }
       setDisplayName('');
-      setContent('');
       await loadDocuments();
-    } catch {
-      setUploadError('No se pudo subir el documento. Revisa que tenga texto.');
+    } catch (err) {
+      setUploadError(
+        err instanceof Error && mode === 'file'
+          ? err.message
+          : 'No se pudo subir el documento. Revisa que tenga texto.',
+      );
     } finally {
       setUploading(false);
     }
@@ -93,6 +125,31 @@ export default function DocumentsPage() {
         >
           <h2 className="font-serif font-semibold text-ink mb-4">Subir un documento nuevo</h2>
 
+          <div className="flex gap-1 mb-5 border border-line rounded-lg p-1 w-fit">
+            {(
+              [
+                ['text', 'Pegar texto'],
+                ['file', 'Subir archivo'],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => {
+                  setMode(value);
+                  setUploadError('');
+                }}
+                className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${
+                  mode === value
+                    ? 'bg-accent text-white'
+                    : 'text-muted hover:text-ink'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
           {uploadError && (
             <p className="text-sm text-accent bg-accent/10 border border-accent/20 rounded px-3 py-2 mb-4">
               {uploadError}
@@ -100,35 +157,61 @@ export default function DocumentsPage() {
           )}
 
           <label className="block text-xs font-semibold uppercase tracking-wide text-muted mb-1.5">
-            Nombre
+            Nombre {mode === 'file' && <span className="normal-case font-normal">(opcional, se usa el nombre del archivo si lo dejas vacío)</span>}
           </label>
           <input
             type="text"
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
-            required
+            required={mode === 'text'}
             placeholder="Ej: Política de devoluciones"
             className="w-full border border-line rounded px-3 py-2.5 mb-4 bg-white text-ink placeholder:text-muted/60 focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
           />
 
-          <label className="block text-xs font-semibold uppercase tracking-wide text-muted mb-1.5">
-            Contenido
-          </label>
-          <textarea
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            required
-            rows={6}
-            placeholder="Pega aquí el texto (horarios, políticas, catálogo, preguntas frecuentes...)"
-            className="w-full border border-line rounded px-3 py-2.5 mb-4 bg-white text-ink placeholder:text-muted/60 focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors resize-y"
-          />
+          {mode === 'text' ? (
+            <>
+              <label className="block text-xs font-semibold uppercase tracking-wide text-muted mb-1.5">
+                Contenido
+              </label>
+              <textarea
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                required
+                rows={6}
+                placeholder="Pega aquí el texto (horarios, políticas, catálogo, preguntas frecuentes...)"
+                className="w-full border border-line rounded px-3 py-2.5 mb-4 bg-white text-ink placeholder:text-muted/60 focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors resize-y"
+              />
+            </>
+          ) : (
+            <>
+              <label className="block text-xs font-semibold uppercase tracking-wide text-muted mb-1.5">
+                Archivo
+              </label>
+              <input
+                type="file"
+                accept=".pdf,.docx,.xlsx,.xls"
+                onChange={handleFileChange}
+                className="w-full border border-line rounded px-3 py-2.5 mb-1.5 bg-white text-ink file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:bg-accent/10 file:text-accent file:font-semibold file:cursor-pointer cursor-pointer focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
+              />
+              <p className="text-xs text-muted mb-4">
+                PDF, Word o Excel, hasta 10MB.
+                {file && (
+                  <span className="text-ink font-semibold"> Seleccionado: {file.name}</span>
+                )}
+              </p>
+            </>
+          )}
 
           <button
             type="submit"
             disabled={uploading}
             className="bg-accent text-white rounded px-5 py-2.5 font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity"
           >
-            {uploading ? 'Subiendo…' : 'Subir documento'}
+            {uploading
+              ? mode === 'file'
+                ? 'Procesando archivo… puede tardar unos segundos'
+                : 'Subiendo…'
+              : 'Subir documento'}
           </button>
         </form>
 

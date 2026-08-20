@@ -23,9 +23,11 @@ export class KnowledgeService {
     private readonly voyageService: VoyageService,
   ) {}
 
-  // Usado por POST /knowledge/documents -- dentro de un request HTTP
+  // Usado por POST /knowledge/documents (texto pegado a mano) y por
+  // POST /knowledge/documents/upload (archivo real, ya convertido a
+  // texto plano por document-parser.ts) -- dentro de un request HTTP
   // real, con el TenantInterceptor ya manejando la transaccion.
-  async ingestDocument(displayName: string, content: string) {
+  async ingestDocument(displayName: string, content: string, sourceType = 'manual_text') {
     const tenantId = this.tenantContext.getTenantId();
     const manager = this.tenantContext.manager;
 
@@ -36,9 +38,9 @@ export class KnowledgeService {
 
     const sourceRows = await manager.query(
       `INSERT INTO knowledge_sources (tenant_id, source_type, display_name, status)
-       VALUES ($1, 'manual_text', $2, 'processing')
+       VALUES ($1, $2, $3, 'processing')
        RETURNING id`,
-      [tenantId, displayName],
+      [tenantId, sourceType, displayName],
     );
     const sourceId = sourceRows[0].id;
 
